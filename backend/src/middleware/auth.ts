@@ -30,7 +30,7 @@ export const verifyToken = async (req: AuthRequest, res: Response, next: NextFun
     };
 
     // Check if user is active
-    const User = (await import('../models/User')).default;
+    const User = (await import('../models/User.js')).default;
     const user = await User.findById(decoded.userId);
 
     if (!user || user.status === 'inactive') {

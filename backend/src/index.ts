@@ -1,6 +1,7 @@
 import express, { Application } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import mongoose from 'mongoose';
 import { connectDB } from './config/database';
 import authRoutes from './routes/auth';
 import academicSessionRoutes from './routes/academicSessions';

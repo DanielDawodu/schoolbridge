@@ -283,7 +283,7 @@ export const saveStudentResult = async (req: AuthRequest, res: Response): Promis
 
     // If teacher, verify they are assigned to these subjects
     if (req.user?.role === 'teacher') {
-      const SubjectRegistration = (await import('../models/SubjectRegistration')).default;
+      const SubjectRegistration = (await import('../models/SubjectRegistration.js')).default;
       const userRegistrations = await SubjectRegistration.find({
         schoolId: req.user?.schoolId,
         sessionId,
