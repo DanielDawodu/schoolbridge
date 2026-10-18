@@ -39,11 +39,9 @@ const Dashboard: React.FC = () => {
         api.get('/classes'),
       ]);
       setStats(statsRes.data);
-      
+
       // Classes now come with classLevelId and periodId populated
       setAssignedClasses(classesRes.data);
-      
-      setAssignedClasses(classesWithSessions);
     } catch (error) {
       console.error('Failed to fetch dashboard data:', error);
     } finally {

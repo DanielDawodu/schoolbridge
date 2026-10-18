@@ -40,8 +40,13 @@ app.use('/api/classes', classGroupRoutes);
 app.use('/api/students', studentRoutes);
 app.use('/api/staff', staffRoutes);
 app.use('/api/teachers', teacherRoutes);
-app.use('/api/migration', migrationRoutes);
-app.use('/api/migrations', migrationsRoutes);
+
+// Migration routes only in development or with explicit flag
+if (process.env.NODE_ENV !== 'production' || process.env.ENABLE_MIGRATIONS === 'true') {
+  app.use('/api/migration', migrationRoutes);
+  app.use('/api/migrations', migrationsRoutes);
+}
+
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/fees', feesRoutes);
@@ -58,7 +63,17 @@ app.use('/api/periods', periodRoutes);
 app.use('/api/class-levels', classLevelRoutes);
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok' });
+  res.json({ ok: true });
+});
+
+app.get('/health/db', async (req, res) => {
+  try {
+    const state = mongoose.connection.readyState;
+    const isConnected = state === 1; // 1 = connected
+    res.json({ ok: isConnected });
+  } catch (error) {
+    res.json({ ok: false });
+  }
 });
 
 const startServer = async (): Promise<void> => {
