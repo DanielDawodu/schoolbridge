@@ -28,7 +28,8 @@ Set these in Vercel project settings:
 
 ## Notes
 
-- Migration routes (`/api/migration`, `/api/migrations`) are disabled in production unless `ENABLE_MIGRATIONS=true`
+- Schema migration routes (`/api/migrations`) are disabled in production unless `ENABLE_MIGRATIONS=true`
+- Student CSV import routes (`/api/migration`) remain enabled in production
 - File uploads use memory storage (Multer) - max 1MB per file
 - Request body limit: 1MB
 - Database connection is cached for warm invocations

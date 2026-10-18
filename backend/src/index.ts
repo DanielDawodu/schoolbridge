@@ -40,10 +40,10 @@ app.use('/api/classes', classGroupRoutes);
 app.use('/api/students', studentRoutes);
 app.use('/api/staff', staffRoutes);
 app.use('/api/teachers', teacherRoutes);
+app.use('/api/migration', migrationRoutes); // Student CSV import - always enabled
 
-// Migration routes only in development or with explicit flag
+// Schema migration routes only in development or with explicit flag
 if (process.env.NODE_ENV !== 'production' || process.env.ENABLE_MIGRATIONS === 'true') {
-  app.use('/api/migration', migrationRoutes);
   app.use('/api/migrations', migrationsRoutes);
 }
 
