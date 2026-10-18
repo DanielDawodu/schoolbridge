@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import User from '../models/User';
+import { JWT_SECRET } from '../config/env';
 
 export interface AuthRequest extends Request {
   user?: {
@@ -10,8 +11,6 @@ export interface AuthRequest extends Request {
     assignedClasses?: any[];
   };
 }
-
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 
 export const verifyToken = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   const authHeader = req.headers.authorization;

@@ -29,7 +29,8 @@ Set these in Vercel project settings:
 ## Notes
 
 - Schema migration routes (`/api/migrations`) are disabled in production unless `ENABLE_MIGRATIONS=true`
-- Student CSV import routes (`/api/migration`) remain enabled in production
+- Student CSV import routes (`api/migration`) remain enabled in production
+- `JWT_SECRET` and `MONGODB_URI` are required with no fallbacks - app will fail to start if missing
 - File uploads use memory storage (Multer) - max 1MB per file
 - Request body limit: 1MB
 - Database connection is cached for warm invocations

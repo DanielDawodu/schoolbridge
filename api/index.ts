@@ -1,20 +1,15 @@
 import { app } from '../backend/src/index';
-import mongoose from 'mongoose';
+import { connectDB } from '../backend/src/config/database';
 
-let cachedDb: any = null;
+let isConnected = false;
 
 const connectToDatabase = async () => {
-  if (cachedDb) {
-    return cachedDb;
+  if (isConnected) {
+    return;
   }
 
-  const MONGODB_URI = process.env.MONGODB_URI;
-  if (!MONGODB_URI) {
-    throw new Error('MONGODB_URI environment variable is not set');
-  }
-
-  cachedDb = await mongoose.connect(MONGODB_URI);
-  return cachedDb;
+  await connectDB();
+  isConnected = true;
 };
 
 export default async (req: any, res: any) => {

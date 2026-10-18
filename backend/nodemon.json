@@ -1,7 +1,5 @@
 {
   "env": {
-    "MONGODB_URI": "",
-    "JWT_SECRET": "your-secret-key-change-in-production",
     "PORT": "5000"
   }
 }

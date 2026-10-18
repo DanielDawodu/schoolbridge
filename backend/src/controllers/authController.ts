@@ -4,8 +4,7 @@ import jwt from 'jsonwebtoken';
 import School from '../models/School';
 import User, { IUser } from '../models/User';
 import { AuthRequest } from '../middleware/auth';
-
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+import { JWT_SECRET } from '../config/env';
 
 export const signup = async (req: Request, res: Response): Promise<void> => {
   try {

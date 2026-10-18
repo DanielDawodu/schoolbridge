@@ -63,11 +63,11 @@ app.use('/api/terms', termRoutes);
 app.use('/api/periods', periodRoutes);
 app.use('/api/class-levels', classLevelRoutes);
 
-app.get('/health', (req, res) => {
+app.get('/api/health', (req, res) => {
   res.json({ ok: true });
 });
 
-app.get('/health/db', async (req, res) => {
+app.get('/api/health/db', async (req, res) => {
   try {
     const state = mongoose.connection.readyState;
     const isConnected = state === 1; // 1 = connected
