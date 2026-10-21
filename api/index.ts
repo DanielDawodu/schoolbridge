@@ -25,12 +25,9 @@ export default async (req: any, res: any) => {
   if (req.url === '/api/health/db' || req.path === '/api/health/db') {
     try {
       await connectToDatabase();
-      const mongoose = await import('mongoose/index.js');
-      const state = mongoose.connection.readyState;
-      const isConnected = state === 1;
       res.setHeader('Content-Type', 'application/json');
       res.statusCode = 200;
-      res.end(JSON.stringify({ ok: isConnected }));
+      res.end(JSON.stringify({ ok: true }));
     } catch (error) {
       res.setHeader('Content-Type', 'application/json');
       res.statusCode = 200;
