@@ -33,6 +33,11 @@ export default async (req: any, res: any) => {
   // Connect to database
   await connectToDatabase();
 
-  // Handle request
-  return app(req, res);
+  // Handle request with Express
+  return new Promise((resolve, reject) => {
+    app(req, res, (err: any) => {
+      if (err) reject(err);
+      else resolve(undefined);
+    });
+  });
 };
