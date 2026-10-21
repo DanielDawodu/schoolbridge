@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken';
 import School from '../models/School';
 import User, { IUser } from '../models/User';
 import { AuthRequest } from '../middleware/auth';
-import { JWT_SECRET } from '../config/env';
+import { JWT_SECRET_VALUE } from '../config/env';
 
 export const signup = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -46,7 +46,7 @@ export const signup = async (req: Request, res: Response): Promise<void> => {
 
       const token = jwt.sign(
         { userId: user._id, schoolId: school._id, role: user.role },
-        JWT_SECRET,
+        JWT_SECRET_VALUE,
         { expiresIn: '7d' }
       );
 
@@ -103,7 +103,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
 
     const token = jwt.sign(
       { userId: user._id, schoolId: user.schoolId, role: user.role },
-      JWT_SECRET,
+      JWT_SECRET_VALUE,
       { expiresIn: '7d' }
     );
 

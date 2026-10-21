@@ -1,6 +1,5 @@
 import express, { Application } from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import { connectDB } from './config/database';
 import authRoutes from './routes/auth';
@@ -26,10 +25,7 @@ import termRoutes from './routes/terms';
 import periodRoutes from './routes/periods';
 import classLevelRoutes from './routes/classLevels';
 
-dotenv.config();
-
 const app: Application = express();
-const PORT = process.env.PORT || 5000;
 
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
@@ -76,21 +72,5 @@ app.get('/api/health/db', async (req, res) => {
     res.json({ ok: false });
   }
 });
-
-const startServer = async (): Promise<void> => {
-  try {
-    await connectDB();
-    app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
-    });
-  } catch (error) {
-    console.error('Failed to start server:', error);
-    process.exit(1);
-  }
-};
-
-if (require.main === module) {
-  startServer();
-}
 
 export { app };
