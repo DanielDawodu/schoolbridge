@@ -1,12 +1,5 @@
-let app: any;
-let connectDB: any;
-
-try {
-  const module = await import('../backend/src/index');
-  app = module.app;
-} catch (error) {
-  console.error('Failed to load app:', error);
-}
+import { app } from '../backend/src/index.js';
+import { connectDB } from '../backend/src/config/database.js';
 
 let isConnected = false;
 
@@ -15,15 +8,8 @@ const connectToDatabase = async () => {
     return;
   }
 
-  try {
-    const dbModule = await import('../backend/src/config/database');
-    connectDB = dbModule.connectDB;
-    await connectDB();
-    isConnected = true;
-  } catch (error) {
-    console.error('Failed to connect to database:', error);
-    throw error;
-  }
+  await connectDB();
+  isConnected = true;
 };
 
 export default async (req: any, res: any) => {
