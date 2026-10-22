@@ -1,19 +1,32 @@
 let app: any;
 let connectDB: any;
 let isConnected = false;
+let isInitializing = false;
 
 const initializeApp = async () => {
   if (app) return;
+  if (isInitializing) {
+    // Wait for initialization to complete
+    await new Promise(resolve => setTimeout(resolve, 100));
+    return initializeApp();
+  }
+
+  isInitializing = true;
 
   try {
+    console.log('Initializing backend modules...');
     const indexModule = await import('../backend/src/index.js');
     app = indexModule.app;
     const dbModule = await import('../backend/src/config/database.js');
     connectDB = dbModule.connectDB;
+    console.log('Backend modules initialized successfully');
   } catch (error) {
     console.error('Failed to initialize app:', error);
+    isInitializing = false;
     throw error;
   }
+
+  isInitializing = false;
 };
 
 const connectToDatabase = async () => {
@@ -22,8 +35,16 @@ const connectToDatabase = async () => {
   }
 
   await initializeApp();
-  await connectDB();
-  isConnected = true;
+
+  console.log('Connecting to database...');
+  try {
+    await connectDB();
+    isConnected = true;
+    console.log('Database connected successfully');
+  } catch (error) {
+    console.error('Database connection failed:', error);
+    throw error;
+  }
 };
 
 export default async (req: any, res: any) => {
@@ -52,8 +73,10 @@ export default async (req: any, res: any) => {
     app(req, res);
   } catch (error) {
     console.error('Error handling request:', error);
-    res.statusCode = 500;
-    res.setHeader('Content-Type', 'application/json');
-    res.end(JSON.stringify({ error: 'Internal server error' }));
+    if (!res.headersSent) {
+      res.statusCode = 500;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ error: 'Internal server error' }));
+    }
   }
 };
