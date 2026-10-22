@@ -69,8 +69,22 @@ export default async (req: any, res: any) => {
     // Connect to database
     await connectToDatabase();
 
-    // Handle request with Express
-    app(req, res);
+    // Handle request with Express using a promise
+    return new Promise((resolve, reject) => {
+      app(req, res, (err: any) => {
+        if (err) {
+          console.error('Express error:', err);
+          if (!res.headersSent) {
+            res.statusCode = 500;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ error: 'Internal server error' }));
+          }
+          reject(err);
+        } else {
+          resolve(undefined);
+        }
+      });
+    });
   } catch (error) {
     console.error('Error handling request:', error);
     if (!res.headersSent) {
