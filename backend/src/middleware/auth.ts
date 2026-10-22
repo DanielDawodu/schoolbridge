@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import User from '../models/User';
-import { JWT_SECRET_VALUE } from '../config/env';
+import { getJWTSecret } from '../config/env';
 
 export interface AuthRequest extends Request {
   user?: {
@@ -23,7 +23,7 @@ export const verifyToken = async (req: AuthRequest, res: Response, next: NextFun
   const token = authHeader.substring(7);
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET_VALUE) as {
+    const decoded = jwt.verify(token, getJWTSecret()) as {
       userId: string;
       schoolId: string;
       role: string;
