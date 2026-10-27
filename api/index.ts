@@ -1,40 +1,12 @@
-let app: any;
-let connectDB: any;
+import { app } from '../backend/src/index.js';
+import { connectDB } from '../backend/src/config/database.js';
+
 let isConnected = false;
-let isInitializing = false;
-
-const initializeApp = async () => {
-  if (app) return;
-  if (isInitializing) {
-    // Wait for initialization to complete
-    await new Promise(resolve => setTimeout(resolve, 100));
-    return initializeApp();
-  }
-
-  isInitializing = true;
-
-  try {
-    console.log('Initializing backend modules...');
-    const indexModule = await import('../backend/src/index.js');
-    app = indexModule.app;
-    const dbModule = await import('../backend/src/config/database.js');
-    connectDB = dbModule.connectDB;
-    console.log('Backend modules initialized successfully');
-  } catch (error) {
-    console.error('Failed to initialize app:', error);
-    isInitializing = false;
-    throw error;
-  }
-
-  isInitializing = false;
-};
 
 const connectToDatabase = async () => {
   if (isConnected) {
     return;
   }
-
-  await initializeApp();
 
   console.log('Connecting to database...');
   try {
