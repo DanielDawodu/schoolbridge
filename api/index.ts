@@ -31,12 +31,17 @@ export default async (req: any, res: any) => {
     return;
   }
 
-  // Database health check - accurately reports Mongoose connection state
+  // Database health check - attempts connection and reports status
   if (req.url === '/api/health/db' || req.path === '/api/health/db') {
-    const isConnected = mongoose.connection.readyState === 1;
     res.setHeader('Content-Type', 'application/json');
-    res.statusCode = isConnected ? 200 : 503;
-    res.end(JSON.stringify({ ok: isConnected }));
+    try {
+      await connectToDatabase();
+      res.statusCode = 200;
+      res.end(JSON.stringify({ ok: true, state: 'connected' }));
+    } catch (err: any) {
+      res.statusCode = 503;
+      res.end(JSON.stringify({ ok: false, error: err?.message || 'Database connection failed' }));
+    }
     return;
   }
 
