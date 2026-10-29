@@ -9,6 +9,18 @@ const Login: React.FC = () => {
   const { login } = useAuth();
   const navigate = useNavigate();
 
+  const extractErrorMessage = (err: any): string => {
+    const data = err.response?.data;
+    if (!data) return err.message || 'Login failed';
+    if (typeof data === 'string') return data;
+    if (typeof data.error === 'string') return data.error;
+    if (data.error && typeof data.error === 'object') {
+      return data.error.message || data.error.code || JSON.stringify(data.error);
+    }
+    if (typeof data.message === 'string') return data.message;
+    return 'Login failed';
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -16,7 +28,7 @@ const Login: React.FC = () => {
       await login(email, password);
       navigate('/dashboard');
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Login failed');
+      setError(extractErrorMessage(err));
     }
   };
 

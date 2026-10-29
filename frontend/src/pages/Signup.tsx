@@ -12,6 +12,18 @@ const Signup: React.FC = () => {
   const { signup } = useAuth();
   const navigate = useNavigate();
 
+  const extractErrorMessage = (err: any): string => {
+    const data = err.response?.data;
+    if (!data) return err.message || 'Signup failed';
+    if (typeof data === 'string') return data;
+    if (typeof data.error === 'string') return data.error;
+    if (data.error && typeof data.error === 'object') {
+      return data.error.message || data.error.code || JSON.stringify(data.error);
+    }
+    if (typeof data.message === 'string') return data.message;
+    return 'Signup failed';
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -25,7 +37,7 @@ const Signup: React.FC = () => {
       });
       navigate('/dashboard');
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Signup failed');
+      setError(extractErrorMessage(err));
     }
   };
 
