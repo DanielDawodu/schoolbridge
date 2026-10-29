@@ -65,15 +65,18 @@ export const getStudents = async (req: AuthRequest, res: Response): Promise<void
     // If user is a teacher, filter by their assigned classes
     if (req.user?.role === 'teacher') {
       const teacher = await User.findById(req.user.userId);
-      if (teacher && teacher.assignedClasses.length > 0) {
-        filter.classId = { $in: teacher.assignedClasses };
+      const assigned = (teacher?.assignedClasses || []).map((id: any) => id.toString());
+      if (classId) {
+        if (!assigned.includes(classId.toString())) {
+          // Teacher is requesting a class they are not assigned to
+          res.json([]);
+          return;
+        }
+        filter.classId = classId;
       } else {
-        // Teacher with no assigned classes sees no students
-        filter.classId = { $in: [] };
+        filter.classId = { $in: teacher?.assignedClasses || [] };
       }
-    }
-    
-    if (classId) {
+    } else if (classId) {
       filter.classId = classId;
     }
     

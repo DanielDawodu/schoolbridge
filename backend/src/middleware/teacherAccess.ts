@@ -89,7 +89,8 @@ export const requireAdminOrTeacherForClass = async (req: AuthRequest, res: Respo
       return;
     }
 
-    if (!req.user.assignedClasses || !req.user.assignedClasses.includes(classId)) {
+    const assigned = (req.user.assignedClasses || []).map((id: any) => id.toString());
+    if (!assigned.includes(classId.toString())) {
       res.status(403).json({ error: 'You can only access your assigned classes' });
       return;
     }

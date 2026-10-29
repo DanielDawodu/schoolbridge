@@ -85,14 +85,21 @@ export const getDashboardStats = async (req: AuthRequest, res: Response): Promis
         }).sort({ createdAt: 1 });
       }
 
-      if (currentPeriod) {
-        const invoices = await FeeInvoice.find({
+      if (currentPeriod || school?.activeTermId) {
+        const possibleTermIds = [
+          currentPeriod?._id,
+          (currentPeriod as any)?.sessionId,
+          school?.activeTermId,
+          school?.activePeriodId,
+        ].filter(Boolean) as any[];
+
+        const invoices: any[] = await FeeInvoice.find({
           schoolId: req.user?.schoolId,
-          termId: (currentPeriod as any)._id.toString(),
+          termId: { $in: possibleTermIds },
         });
 
         // Filter payments by the invoices in this term to ensure accurate aggregation
-        const invoiceIds = invoices.map((inv) => inv._id.toString());
+        const invoiceIds = invoices.map((inv: any) => inv._id.toString());
         const payments = await FeePayment.find({
           schoolId: req.user?.schoolId,
           invoiceId: { $in: invoiceIds },
@@ -103,7 +110,7 @@ export const getDashboardStats = async (req: AuthRequest, res: Response): Promis
         let totalOutstanding = 0;
         let totalCredit = 0;
 
-        invoices.forEach((invoice) => {
+        invoices.forEach((invoice: any) => {
           totalExpected += invoice.amountDue;
           const invoicePayments = payments.filter(
             (p) => p.invoiceId.toString() === invoice._id.toString()
@@ -120,8 +127,12 @@ export const getDashboardStats = async (req: AuthRequest, res: Response): Promis
         });
 
         // Get session and term info for display
-        const session = await Session.findById((currentPeriod as any).sessionId);
-        const term = await Term.findById((currentPeriod as any).termId);
+        let session = null;
+        let term = null;
+        if (currentPeriod) {
+          session = await Session.findById((currentPeriod as any).sessionId);
+          term = await Term.findById((currentPeriod as any).termId);
+        }
 
         feesSummary = {
           totalExpected,

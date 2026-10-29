@@ -3,12 +3,13 @@ import StudentResult from '../models/StudentResult';
 import Student from '../models/Student';
 import Attendance from '../models/Attendance';
 import AcademicSession from '../models/AcademicSession';
+import Period from '../models/Period';
 import Subject from '../models/Subject';
 import SubjectRegistration from '../models/SubjectRegistration';
 import { AuthRequest } from '../middleware/auth';
 import { addSchoolFilter } from '../middleware/multiTenant';
 
-// Default grade scale (can be made configurable in Settings later)
+// Default grade scale
 const GRADE_SCALE = [
   { min: 70, max: 100, grade: 'A' },
   { min: 60, max: 69, grade: 'B' },
@@ -26,12 +27,39 @@ const calculateGrade = (score: number): string => {
   return 'F';
 };
 
+const resolvePeriodAndSession = async (targetId: string, schoolId?: any) => {
+  let period: any = null;
+  let session: any = null;
+
+  if (targetId) {
+    period = await Period.findOne({ _id: targetId, ...(schoolId ? { schoolId } : {}) });
+    if (!period) {
+      session = await AcademicSession.findOne({ _id: targetId, ...(schoolId ? { schoolId } : {}) });
+      if (session) {
+        period = await Period.findOne({ sessionId: session._id, ...(schoolId ? { schoolId } : {}) });
+      }
+    } else {
+      session = await AcademicSession.findById(period.sessionId);
+    }
+  }
+
+  const daysOpen = period?.daysOpen || session?.daysOpen || 0;
+  return { period, session, daysOpen };
+};
+
+const buildPeriodOrSessionFilter = (targetId: string) => {
+  return {
+    $or: [{ periodId: targetId }, { sessionId: targetId }],
+  };
+};
+
 const calculateAttendanceSummary = async (
+  schoolId: any,
   studentId: string,
-  sessionId: string,
   daysOpen: number
 ): Promise<{ daysOpen: number; daysPresent: number; daysAbsent: number }> => {
   const attendanceRecords = await Attendance.find({
+    schoolId,
     'records.studentId': studentId,
   });
 
@@ -58,28 +86,25 @@ const calculateAttendanceSummary = async (
 
 export const createOrUpdateResult = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { sessionId, studentId, subjectScores, psychomotorSkills, affectiveDomain, teacherComment } = req.body;
+    const { sessionId, periodId, studentId, subjectScores, psychomotorSkills, affectiveDomain, teacherComment } = req.body;
+    const targetId = periodId || sessionId;
 
-    if (!sessionId || !studentId) {
-      res.status(400).json({ error: 'Session ID and student ID are required' });
+    if (!targetId || !studentId) {
+      res.status(400).json({ error: 'Session/Period ID and student ID are required' });
       return;
     }
 
-    // Get student and session
     const student = await Student.findOne({
       _id: studentId,
       schoolId: req.user?.schoolId,
     });
 
-    const session = await AcademicSession.findOne({
-      _id: sessionId,
-      schoolId: req.user?.schoolId,
-    });
-
-    if (!student || !session) {
-      res.status(404).json({ error: 'Student or session not found' });
+    if (!student) {
+      res.status(404).json({ error: 'Student not found' });
       return;
     }
+
+    const { period, session, daysOpen } = await resolvePeriodAndSession(targetId, req.user?.schoolId);
 
     // Calculate totals and grades for each subject
     const processedScores = await Promise.all(
@@ -89,33 +114,30 @@ export const createOrUpdateResult = async (req: AuthRequest, res: Response): Pro
         const ca2Weight = subject?.ca2Weight || 20;
         const examWeight = subject?.examWeight || 60;
 
-        const total = (score.ca1 * ca1Weight / 100) + (score.ca2 * ca2Weight / 100) + (score.exam * examWeight / 100);
+        const total = (score.ca1 * ca1Weight) / 100 + (score.ca2 * ca2Weight) / 100 + (score.exam * examWeight) / 100;
         const grade = calculateGrade(total);
 
         return {
           ...score,
           total: Math.round(total),
           grade,
-          position: 0, // Will be calculated later
+          position: 0,
         };
       })
     );
 
-    // Calculate total and average
     const totalScore = processedScores.reduce((sum, s) => sum + s.total, 0);
     const averageScore = processedScores.length > 0 ? totalScore / processedScores.length : 0;
 
-    // Calculate attendance summary
     const attendanceSummary = await calculateAttendanceSummary(
+      req.user?.schoolId,
       studentId,
-      sessionId,
-      session.daysOpen || 0
+      daysOpen
     );
 
-    // Find existing result or create new
     let result = await StudentResult.findOne({
       schoolId: req.user?.schoolId,
-      sessionId,
+      ...buildPeriodOrSessionFilter(targetId),
       studentId,
     });
 
@@ -127,11 +149,14 @@ export const createOrUpdateResult = async (req: AuthRequest, res: Response): Pro
       result.totalScore = Math.round(totalScore);
       result.averageScore = Math.round(averageScore);
       result.attendanceSummary = attendanceSummary;
+      if (period?._id) result.periodId = period._id;
+      if (session?._id) result.sessionId = session._id;
       await result.save();
     } else {
       result = new StudentResult({
         schoolId: req.user?.schoolId,
-        sessionId,
+        periodId: period?._id || targetId,
+        sessionId: session?._id || targetId,
         studentId,
         classId: student.classId,
         subjectScores: processedScores,
@@ -154,15 +179,16 @@ export const createOrUpdateResult = async (req: AuthRequest, res: Response): Pro
 
 export const getStudentResult = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { sessionId, studentId, performanceType } = req.query;
+    const { sessionId, periodId, studentId, performanceType } = req.query;
+    const targetId = (periodId || sessionId) as string;
 
-    if (!sessionId || !studentId) {
-      res.status(400).json({ error: 'Session ID and student ID are required' });
+    if (!targetId || !studentId) {
+      res.status(400).json({ error: 'Session/Period ID and student ID are required' });
       return;
     }
 
     const filter = addSchoolFilter(req, {
-      sessionId,
+      ...buildPeriodOrSessionFilter(targetId),
       studentId,
       performanceType: performanceType || 'term',
     });
@@ -170,6 +196,7 @@ export const getStudentResult = async (req: AuthRequest, res: Response): Promise
     const result = await StudentResult.findOne(filter)
       .populate('studentId')
       .populate('classId')
+      .populate('periodId')
       .populate('sessionId');
 
     if (!result) {
@@ -186,43 +213,39 @@ export const getStudentResult = async (req: AuthRequest, res: Response): Promise
 
 export const getClassResults = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { sessionId, classId } = req.query;
+    const { sessionId, periodId, classId } = req.query;
+    const targetId = (periodId || sessionId) as string;
 
-    if (!sessionId || !classId) {
-      res.status(400).json({ error: 'Session ID and class ID are required' });
+    if (!targetId || !classId) {
+      res.status(400).json({ error: 'Session/Period ID and class ID are required' });
       return;
     }
 
     const filter = addSchoolFilter(req, {
-      sessionId,
+      ...buildPeriodOrSessionFilter(targetId),
       classId,
     });
 
-    let results = await StudentResult.find(filter)
+    const results = await StudentResult.find(filter)
       .populate('studentId')
       .populate('classId')
+      .populate('periodId')
+      .populate('sessionId')
       .sort({ averageScore: -1 });
 
-    // Calculate class positions
-    results = results.map((result, index) => {
-      result.classPosition = index + 1;
-      return result;
-    });
-
-    // Calculate class average
     const classAverage = results.length > 0
       ? results.reduce((sum, r) => sum + r.averageScore, 0) / results.length
       : 0;
 
-    // Update each result with class average
-    await Promise.all(
-      results.map(async (result) => {
-        result.classAverage = Math.round(classAverage);
-        await result.save();
-      })
-    );
+    // Calculate class positions and average in memory for fast idempotent response
+    const formattedResults = results.map((result, index) => {
+      const obj = result.toObject();
+      obj.classPosition = index + 1;
+      obj.classAverage = Math.round(classAverage);
+      return obj;
+    });
 
-    res.json(results);
+    res.json(formattedResults);
   } catch (error) {
     console.error('Get class results error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -259,38 +282,45 @@ export const updateHeadOfSchoolComment = async (req: AuthRequest, res: Response)
 
 export const saveStudentResult = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { sessionId, studentId, subjectScores, psychomotorSkills, affectiveDomain, teacherComment, headOfSchoolComment, performanceType } = req.body;
+    const {
+      sessionId,
+      periodId,
+      studentId,
+      subjectScores,
+      psychomotorSkills,
+      affectiveDomain,
+      teacherComment,
+      headOfSchoolComment,
+      performanceType,
+    } = req.body;
+    const targetId = periodId || sessionId;
 
-    if (!sessionId || !studentId) {
-      res.status(400).json({ error: 'Session ID and student ID are required' });
+    if (!targetId || !studentId) {
+      res.status(400).json({ error: 'Session/Period ID and student ID are required' });
       return;
     }
 
-    // Get student and session
     const student = await Student.findOne({
       _id: studentId,
       schoolId: req.user?.schoolId,
     });
 
-    const session = await AcademicSession.findOne({
-      _id: sessionId,
-      schoolId: req.user?.schoolId,
-    });
-
-    if (!student || !session) {
-      res.status(404).json({ error: 'Student or session not found' });
+    if (!student) {
+      res.status(404).json({ error: 'Student not found' });
       return;
     }
+
+    const { period, session, daysOpen } = await resolvePeriodAndSession(targetId, req.user?.schoolId);
 
     // If teacher, verify they are assigned to these subjects
     if (req.user?.role === 'teacher') {
       const userRegistrations = await SubjectRegistration.find({
         schoolId: req.user?.schoolId,
-        sessionId,
+        ...buildPeriodOrSessionFilter(targetId),
         assignedTeacherId: req.user.userId,
       });
 
-      const assignedSubjectIds = userRegistrations.map(r => r.subjectId.toString());
+      const assignedSubjectIds = userRegistrations.map((r) => r.subjectId.toString());
       const requestedSubjectIds = (subjectScores || []).map((s: any) => s.subjectId);
 
       for (const subjectId of requestedSubjectIds) {
@@ -309,38 +339,35 @@ export const saveStudentResult = async (req: AuthRequest, res: Response): Promis
         const ca2Weight = subject?.ca2Weight || 20;
         const examWeight = subject?.examWeight || 60;
 
-        const total = (score.ca1 * ca1Weight / 100) + (score.ca2 * ca2Weight / 100) + (score.exam * examWeight / 100);
+        const total = (score.ca1 * ca1Weight) / 100 + (score.ca2 * ca2Weight) / 100 + (score.exam * examWeight) / 100;
         const grade = calculateGrade(total);
 
         return {
           ...score,
           total: Math.round(total),
           grade,
-          position: 0, // Will be calculated later
+          position: 0,
         };
       })
     );
 
-    // Calculate total and average
     const totalScore = processedScores.reduce((sum, s) => sum + s.total, 0);
     const averageScore = processedScores.length > 0 ? totalScore / processedScores.length : 0;
 
-    // Calculate attendance summary (only for full term results)
-    const attendanceSummary = performanceType === 'term'
-      ? await calculateAttendanceSummary(studentId, sessionId, session.daysOpen || 0)
-      : { daysOpen: 0, daysPresent: 0, daysAbsent: 0 };
+    const attendanceSummary =
+      performanceType === 'term' || !performanceType
+        ? await calculateAttendanceSummary(req.user?.schoolId, studentId, daysOpen)
+        : { daysOpen: 0, daysPresent: 0, daysAbsent: 0 };
 
-    // Find existing result or create new
     let result = await StudentResult.findOne({
       schoolId: req.user?.schoolId,
-      sessionId,
+      ...buildPeriodOrSessionFilter(targetId),
       studentId,
       performanceType: performanceType || 'term',
     });
 
     if (result) {
       result.subjectScores = processedScores;
-      // Only update psychomotor/affective for full term
       if (performanceType === 'term' || !performanceType) {
         result.psychomotorSkills = psychomotorSkills || [];
         result.affectiveDomain = affectiveDomain || [];
@@ -352,17 +379,20 @@ export const saveStudentResult = async (req: AuthRequest, res: Response): Promis
       result.totalScore = Math.round(totalScore);
       result.averageScore = Math.round(averageScore);
       result.attendanceSummary = attendanceSummary;
+      if (period?._id) result.periodId = period._id;
+      if (session?._id) result.sessionId = session._id;
       await result.save();
     } else {
       result = new StudentResult({
         schoolId: req.user?.schoolId,
-        sessionId,
+        periodId: period?._id || targetId,
+        sessionId: session?._id || targetId,
         studentId,
         classId: student.classId,
         performanceType: performanceType || 'term',
         subjectScores: processedScores,
-        psychomotorSkills: (performanceType === 'term' || !performanceType) ? (psychomotorSkills || []) : [],
-        affectiveDomain: (performanceType === 'term' || !performanceType) ? (affectiveDomain || []) : [],
+        psychomotorSkills: performanceType === 'term' || !performanceType ? psychomotorSkills || [] : [],
+        affectiveDomain: performanceType === 'term' || !performanceType ? affectiveDomain || [] : [],
         teacherComment: teacherComment || '',
         headOfSchoolComment: headOfSchoolComment || '',
         totalScore: Math.round(totalScore),
@@ -381,22 +411,24 @@ export const saveStudentResult = async (req: AuthRequest, res: Response): Promis
 
 export const getStudentTermResults = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { sessionId, studentId } = req.query;
+    const { sessionId, periodId, studentId } = req.query;
+    const targetId = (periodId || sessionId) as string;
 
-    if (!sessionId || !studentId) {
-      res.status(400).json({ error: 'Session ID and student ID are required' });
+    if (!targetId || !studentId) {
+      res.status(400).json({ error: 'Session/Period ID and student ID are required' });
       return;
     }
 
     const filter = addSchoolFilter(req, {
-      sessionId,
+      ...buildPeriodOrSessionFilter(targetId),
       studentId,
       performanceType: 'term',
     });
 
     const results = await StudentResult.find(filter)
+      .populate('periodId')
       .populate('sessionId')
-      .sort({ 'sessionId.currentTerm': 1 });
+      .sort({ createdAt: 1 });
 
     res.json(results);
   } catch (error) {
@@ -407,15 +439,16 @@ export const getStudentTermResults = async (req: AuthRequest, res: Response): Pr
 
 export const releaseResults = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { sessionId, classId } = req.body;
+    const { sessionId, periodId, classId } = req.body;
+    const targetId = periodId || sessionId;
 
-    if (!sessionId || !classId) {
-      res.status(400).json({ error: 'Session ID and class ID are required' });
+    if (!targetId || !classId) {
+      res.status(400).json({ error: 'Session/Period ID and class ID are required' });
       return;
     }
 
     const filter = addSchoolFilter(req, {
-      sessionId,
+      ...buildPeriodOrSessionFilter(targetId),
       classId,
     });
 

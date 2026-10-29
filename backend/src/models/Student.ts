@@ -90,6 +90,8 @@ const StudentSchema: Schema = new Schema({
   },
 });
 
+StudentSchema.index({ schoolId: 1, admissionNo: 1 }, { unique: true });
+
 StudentSchema.pre('save', function (this: any, next: any) {
   if (!this.isNew) {
     this.updatedAt = new Date();

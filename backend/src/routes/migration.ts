@@ -21,7 +21,7 @@ const storage = multer.memoryStorage();
 const upload = multer({
   storage,
   limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB limit
+    fileSize: Math.floor(4.5 * 1024 * 1024), // 4.5MB limit (Vercel serverless payload ceiling)
   },
   fileFilter: (req, file, cb) => {
     const allowedTypes = ['text/csv', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'];

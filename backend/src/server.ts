@@ -1,10 +1,11 @@
 import dotenv from 'dotenv';
+dotenv.config();
+
 import { app } from './index';
 import { connectDB } from './config/database';
 
-dotenv.config();
-
 const PORT = process.env.PORT || 5000;
+
 
 const startServer = async (): Promise<void> => {
   try {

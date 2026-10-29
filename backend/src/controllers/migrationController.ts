@@ -4,6 +4,8 @@ import { validateImport } from '../services/validation';
 import Student from '../models/Student';
 import MigrationBatch from '../models/MigrationBatch';
 import ClassGroup from '../models/ClassGroup';
+import ClassLevel from '../models/ClassLevel';
+import Period from '../models/Period';
 import { AuthRequest } from '../middleware/auth';
 import { addSchoolFilter } from '../middleware/multiTenant';
 
@@ -133,7 +135,7 @@ export const confirmImport = async (req: AuthRequest, res: Response): Promise<vo
     });
   } catch (error) {
     console.error('Import error:', error);
-    res.status(500). json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Internal server error' });
   }
 };
 
@@ -231,7 +233,9 @@ export const rollbackBatch = async (req: AuthRequest, res: Response): Promise<vo
 export const getClasses = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const filter = addSchoolFilter(req);
-    const classes = await ClassGroup.find(filter).sort({ name: 1, arm: 1 });
+    const classes = await ClassGroup.find(filter)
+      .populate('classLevelId')
+      .populate('periodId');
     res.json(classes);
   } catch (error) {
     console.error('Get classes error:', error);
@@ -241,33 +245,75 @@ export const getClasses = async (req: AuthRequest, res: Response): Promise<void>
 
 export const createClass = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { name, arm, sessionId } = req.body;
+    const { name, arm, sessionId, classLevelId, periodId } = req.body;
 
-    if (!name || !arm) {
-      res.status(400).json({ error: 'Name and arm are required' });
+    if (!arm || (!name && !classLevelId)) {
+      res.status(400).json({ error: 'Class name (or classLevelId) and arm are required' });
       return;
     }
 
-    if (!sessionId) {
-      res.status(400).json({ error: 'Academic session is required. Please select a session from Settings first.' });
+    // Resolve classLevelId: use provided classLevelId or find/create ClassLevel by name
+    let resolvedClassLevelId = classLevelId;
+    if (!resolvedClassLevelId && name) {
+      let classLevel = await ClassLevel.findOne({
+        schoolId: req.user?.schoolId,
+        name: { $regex: new RegExp(`^${name.trim()}$`, 'i') },
+      });
+      if (!classLevel) {
+        classLevel = new ClassLevel({
+          schoolId: req.user?.schoolId,
+          name: name.trim(),
+          order: 1,
+        });
+        await classLevel.save();
+      }
+      resolvedClassLevelId = classLevel._id;
+    }
+
+    // Resolve periodId: use provided periodId, or look up from sessionId / active period
+    let resolvedPeriodId = periodId;
+    if (!resolvedPeriodId && sessionId) {
+      const period = await Period.findOne({
+        schoolId: req.user?.schoolId,
+        $or: [{ _id: sessionId }, { sessionId }],
+      });
+      if (period) {
+        resolvedPeriodId = period._id;
+      }
+    }
+    if (!resolvedPeriodId) {
+      const activePeriod = await Period.findOne({
+        schoolId: req.user?.schoolId,
+        isActive: true,
+      });
+      if (activePeriod) {
+        resolvedPeriodId = activePeriod._id;
+      }
+    }
+
+    if (!resolvedPeriodId) {
+      res.status(400).json({ error: 'Active academic period/session is required. Please set up a period first.' });
       return;
     }
 
     const newClass = new ClassGroup({
       schoolId: req.user?.schoolId,
-      name,
-      arm,
-      sessionId,
+      classLevelId: resolvedClassLevelId,
+      arm: arm.trim(),
+      periodId: resolvedPeriodId,
     });
 
     const savedClass = await newClass.save();
+    await savedClass.populate('classLevelId');
+    await savedClass.populate('periodId');
+
     res.status(201).json(savedClass);
   } catch (error: any) {
     console.error('Create class error:', error);
     
     // Handle duplicate key error
     if (error.code === 11000) {
-      res.status(400).json({ error: 'A class with this name and arm already exists for this session' });
+      res.status(400).json({ error: 'A class with this level and arm already exists for this period' });
     } else if (error.name === 'ValidationError') {
       res.status(400).json({ error: error.message });
     } else {

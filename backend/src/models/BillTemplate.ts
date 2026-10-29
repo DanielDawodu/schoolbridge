@@ -7,12 +7,12 @@ export interface BillLineItem {
 
 export interface BillAppliesTo {
   type: 'class' | 'school';
-  classId?: string;
+  classId?: mongoose.Types.ObjectId;
 }
 
 export interface IBillTemplate extends Document {
-  schoolId: string;
-  termId: string;
+  schoolId: mongoose.Types.ObjectId;
+  termId: mongoose.Types.ObjectId;
   name: string;
   lineItems: BillLineItem[];
   totalAmount: number;

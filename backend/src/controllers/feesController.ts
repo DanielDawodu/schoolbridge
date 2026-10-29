@@ -76,7 +76,9 @@ export const recordPayment = async (req: AuthRequest, res: Response): Promise<vo
 
     const overpayment = totalPaid - invoice.amountDue;
     if (overpayment > 0) {
-      invoice.credit = (invoice.credit || 0) + overpayment;
+      invoice.credit = overpayment;
+    } else {
+      invoice.credit = 0;
     }
 
     if (totalPaid >= invoice.amountDue) {

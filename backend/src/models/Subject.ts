@@ -29,7 +29,6 @@ const SubjectSchema: Schema = new Schema({
     type: String,
     required: true,
     trim: true,
-    unique: true,
   },
   category: {
     type: String,
@@ -71,6 +70,8 @@ const SubjectSchema: Schema = new Schema({
     default: Date.now,
   },
 });
+
+SubjectSchema.index({ schoolId: 1, code: 1 }, { unique: true });
 
 SubjectSchema.pre('save', function (this: any, next: any) {
   if (!this.isNew) {

@@ -101,15 +101,15 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
+    const rawSchoolId = (user.schoolId as any)?._id?.toString() || user.schoolId?.toString();
+    const schoolName = (user.schoolId as any)?.name || '';
+    const schoolAddress = (user.schoolId as any)?.address || '';
+
     const token = jwt.sign(
-      { userId: user._id, schoolId: user.schoolId, role: user.role },
+      { userId: user._id, schoolId: rawSchoolId, role: user.role },
       getJWTSecret(),
       { expiresIn: '7d' }
     );
-
-    const schoolId = user.schoolId;
-    const schoolName = (user.schoolId as any).name || '';
-    const schoolAddress = (user.schoolId as any).address || '';
 
     res.json({
       token,
@@ -120,7 +120,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
         role: user.role,
       },
       school: {
-        id: schoolId,
+        id: rawSchoolId,
         name: schoolName,
         address: schoolAddress,
       },

@@ -1,17 +1,15 @@
-import { app } from '../backend/src/index.js';
-import { connectDB } from '../backend/src/config/database.js';
-
-let isConnected = false;
+import mongoose from 'mongoose';
+import { app } from '../backend/src/index';
+import { connectDB } from '../backend/src/config/database';
 
 const connectToDatabase = async () => {
-  if (isConnected) {
+  if (mongoose.connection.readyState === 1) {
     return;
   }
 
   console.log('Connecting to database...');
   try {
     await connectDB();
-    isConnected = true;
     console.log('Database connected successfully');
   } catch (error) {
     console.error('Database connection failed:', error);
@@ -20,6 +18,11 @@ const connectToDatabase = async () => {
 };
 
 export default async (req: any, res: any) => {
+  // Normalize req.url if needed
+  if (req.url && !req.url.startsWith('/api') && req.url !== '/') {
+    req.url = `/api${req.url}`;
+  }
+
   // Health check endpoint (no database required)
   if (req.url === '/api/health' || req.path === '/api/health') {
     res.setHeader('Content-Type', 'application/json');
@@ -28,12 +31,12 @@ export default async (req: any, res: any) => {
     return;
   }
 
-  // Database health check - skip actual connection test in serverless
-  // The connection will be tested on first real API call
+  // Database health check - accurately reports Mongoose connection state
   if (req.url === '/api/health/db' || req.path === '/api/health/db') {
+    const isConnected = mongoose.connection.readyState === 1;
     res.setHeader('Content-Type', 'application/json');
-    res.statusCode = 200;
-    res.end(JSON.stringify({ ok: true }));
+    res.statusCode = isConnected ? 200 : 503;
+    res.end(JSON.stringify({ ok: isConnected }));
     return;
   }
 
@@ -41,8 +44,13 @@ export default async (req: any, res: any) => {
     // Connect to database
     await connectToDatabase();
 
-    // Handle request with Express
-    app(req, res);
+    // Delegate to Express and wait for response to complete
+    return new Promise<void>((resolve, reject) => {
+      res.on('finish', resolve);
+      res.on('close', resolve);
+      res.on('error', reject);
+      app(req, res);
+    });
   } catch (error) {
     console.error('Error handling request:', error);
     if (!res.headersSent) {

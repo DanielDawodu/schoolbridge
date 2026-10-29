@@ -15,9 +15,9 @@ export const createPeriod = async (req: AuthRequest, res: Response): Promise<voi
       return;
     }
 
-    // Verify session and term exist
-    const session = await Session.findOne({ _id: sessionId });
-    const term = await Term.findOne({ _id: termId });
+    // Verify session and term exist and belong to the user's school
+    const session = await Session.findOne({ _id: sessionId, schoolId: req.user?.schoolId });
+    const term = await Term.findOne({ _id: termId, schoolId: req.user?.schoolId });
 
     if (!session || !term) {
       res.status(404).json({ error: 'Session or Term not found' });

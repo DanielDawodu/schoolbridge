@@ -1,18 +1,21 @@
 import mongoose from 'mongoose';
 
-const MONGODB_URI = process.env.MONGODB_URI;
-
 export const connectDB = async (): Promise<void> => {
-  if (!MONGODB_URI) {
+  if (mongoose.connection.readyState === 1) {
+    return;
+  }
+
+  const mongoUri = process.env.MONGODB_URI;
+  if (!mongoUri) {
     throw new Error('MONGODB_URI environment variable is required');
   }
 
   try {
-    await mongoose.connect(MONGODB_URI);
+    await mongoose.connect(mongoUri);
     console.log('MongoDB connected successfully');
   } catch (error) {
     console.error('MongoDB connection error:', error);
-    process.exit(1);
+    throw error;
   }
 };
 
@@ -25,4 +28,5 @@ export const disconnectDB = async (): Promise<void> => {
   }
 };
 
-export const getMongoURI = (): string => MONGODB_URI || '';
+export const getMongoURI = (): string => process.env.MONGODB_URI || '';
+

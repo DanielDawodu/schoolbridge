@@ -22,7 +22,8 @@ export const markAttendance = async (req: AuthRequest, res: Response): Promise<v
 
     // Teacher access check: can only mark attendance for their assigned classes
     if (req.user?.role === 'teacher') {
-      if (!req.user.assignedClasses || !req.user.assignedClasses.includes(classId)) {
+      const assigned = (req.user.assignedClasses || []).map((id: any) => id.toString());
+      if (!assigned.includes(classId.toString())) {
         res.status(403).json({ error: 'You can only mark attendance for your assigned classes' });
         return;
       }
@@ -79,7 +80,8 @@ export const getClassAttendance = async (req: AuthRequest, res: Response): Promi
 
     // Teacher access check
     if (req.user?.role === 'teacher') {
-      if (!req.user.assignedClasses || !req.user.assignedClasses.includes(classId as any)) {
+      const assigned = (req.user.assignedClasses || []).map((id: any) => id.toString());
+      if (!assigned.includes(classId.toString())) {
         res.status(403).json({ error: 'You can only view attendance for your assigned classes' });
         return;
       }

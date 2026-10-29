@@ -3,17 +3,25 @@ import StudentResult from '../models/StudentResult';
 import Student from '../models/Student';
 import School from '../models/School';
 import AcademicSession from '../models/AcademicSession';
+import Period from '../models/Period';
 import ClassGroup from '../models/ClassGroup';
 import ClassLevel from '../models/ClassLevel';
 import { AuthRequest } from '../middleware/auth';
 import { addSchoolFilter } from '../middleware/multiTenant';
 
+const buildPeriodOrSessionFilter = (targetId: string) => {
+  return {
+    $or: [{ periodId: targetId }, { sessionId: targetId }],
+  };
+};
+
 export const generateReportCard = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { sessionId, studentId, performanceType } = req.query;
+    const { sessionId, periodId, studentId, performanceType } = req.query;
+    const targetId = (periodId || sessionId) as string;
 
-    if (!sessionId || !studentId) {
-      res.status(400).json({ error: 'Session ID and student ID are required' });
+    if (!targetId || !studentId) {
+      res.status(400).json({ error: 'Session/Period ID and student ID are required' });
       return;
     }
 
@@ -21,7 +29,7 @@ export const generateReportCard = async (req: AuthRequest, res: Response): Promi
 
     // Get student result
     const resultFilter = addSchoolFilter(req, {
-      sessionId,
+      ...buildPeriodOrSessionFilter(targetId),
       studentId,
       performanceType: pType,
     });
@@ -29,6 +37,7 @@ export const generateReportCard = async (req: AuthRequest, res: Response): Promi
     const result = await StudentResult.findOne(resultFilter)
       .populate('studentId')
       .populate('classId')
+      .populate('periodId')
       .populate('sessionId');
 
     if (!result) {
@@ -43,31 +52,40 @@ export const generateReportCard = async (req: AuthRequest, res: Response): Promi
     const classInfo = await ClassGroup.findById(result.classId).populate('classLevelId');
 
     // Get session info
-    const session = await AcademicSession.findById(sessionId);
+    let session = await AcademicSession.findById(targetId);
+    if (!session) {
+      const period = await Period.findById(targetId);
+      if (period) {
+        session = await AcademicSession.findById(period.sessionId);
+      }
+    }
 
     // For term results on final term, fetch previous term results for comparison
     let termComparison = null;
     if (pType === 'term' && session && session.currentTerm === session.finalTerm) {
       // Get all term results for this student in this session
       const filter = addSchoolFilter(req, {
-        sessionId,
+        ...buildPeriodOrSessionFilter(targetId),
         studentId,
         performanceType: 'term',
       });
-      const allTermResults = await StudentResult.find(filter).populate('sessionId');
+      const allTermResults = await StudentResult.find(filter)
+        .populate('periodId')
+        .populate('sessionId');
 
       // Map results by term
       const termResults: Record<string, any> = {};
       allTermResults.forEach((r: any) => {
-        const term = r.sessionId.currentTerm;
+        const term = r.sessionId?.currentTerm || 'term';
         termResults[term] = r.averageScore;
       });
 
       // Calculate aggregate
       const termScores = Object.values(termResults).filter((s: any) => s > 0);
-      const aggregate = termScores.length > 0
-        ? Math.round(termScores.reduce((sum: number, s: any) => sum + s, 0) / termScores.length)
-        : 0;
+      const aggregate =
+        termScores.length > 0
+          ? Math.round(termScores.reduce((sum: number, s: any) => sum + s, 0) / termScores.length)
+          : 0;
 
       termComparison = {
         firstTerm: termResults.first || 0,
@@ -85,7 +103,7 @@ export const generateReportCard = async (req: AuthRequest, res: Response): Promi
         signatureUrl: school?.signatureUrl,
       },
       classInfo: {
-        name: (classInfo as any).classLevelId?.name || 'Unknown',
+        name: (classInfo as any)?.classLevelId?.name || 'Unknown',
         arm: classInfo?.arm,
       },
       termComparison,
@@ -98,21 +116,23 @@ export const generateReportCard = async (req: AuthRequest, res: Response): Promi
 
 export const getClassReportCards = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { sessionId, classId } = req.query;
+    const { sessionId, periodId, classId } = req.query;
+    const targetId = (periodId || sessionId) as string;
 
-    if (!sessionId || !classId) {
-      res.status(400).json({ error: 'Session ID and class ID are required' });
+    if (!targetId || !classId) {
+      res.status(400).json({ error: 'Session/Period ID and class ID are required' });
       return;
     }
 
     const filter = addSchoolFilter(req, {
-      sessionId,
+      ...buildPeriodOrSessionFilter(targetId),
       classId,
     });
 
     const results = await StudentResult.find(filter)
       .populate('studentId')
       .populate('classId')
+      .populate('periodId')
       .populate('sessionId')
       .sort({ 'studentId.fullName': 1 });
 

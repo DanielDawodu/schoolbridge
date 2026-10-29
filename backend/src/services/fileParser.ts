@@ -78,11 +78,21 @@ export function parseExcel(file: Buffer): Promise<{ headers: string[]; data: Par
       const workbook = XLSX.read(file, { type: 'buffer' });
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
-      const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as ParsedRow[];
-      
-      if (jsonData.length > 0) {
-        const headers = Object.keys(jsonData[0]);
-        resolve({ headers, data: jsonData });
+      const rawRows = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
+
+      if (rawRows.length > 0) {
+        const headers = (rawRows[0] || []).map((h: any) => String(h || '').trim()).filter(Boolean);
+        const dataRows = rawRows.slice(1);
+        const data: ParsedRow[] = dataRows
+          .filter((row) => row && row.some((cell) => cell !== undefined && cell !== null && String(cell).trim() !== ''))
+          .map((row) => {
+            const rowObj: ParsedRow = {};
+            headers.forEach((header, index) => {
+              rowObj[header] = row[index] !== undefined && row[index] !== null ? String(row[index]).trim() : '';
+            });
+            return rowObj;
+          });
+        resolve({ headers, data });
       } else {
         resolve({ headers: [], data: [] });
       }

@@ -24,6 +24,7 @@ export interface IAffectiveRating {
 export interface IStudentResult extends Document {
   schoolId: mongoose.Types.ObjectId;
   periodId: mongoose.Types.ObjectId;
+  sessionId?: mongoose.Types.ObjectId;
   studentId: mongoose.Types.ObjectId;
   classId: mongoose.Types.ObjectId;
   performanceType: 'mid-term' | 'term';
@@ -136,7 +137,12 @@ const StudentResultSchema: Schema = new Schema({
   periodId: {
     type: Schema.Types.ObjectId,
     ref: 'Period',
-    required: true,
+    required: false,
+  },
+  sessionId: {
+    type: Schema.Types.ObjectId,
+    ref: 'AcademicSession',
+    required: false,
   },
   studentId: {
     type: Schema.Types.ObjectId,
@@ -219,7 +225,8 @@ StudentResultSchema.pre('save', function (this: any, next: any) {
   }
 });
 
-// Unique index to ensure one result per student per period per performance type
-StudentResultSchema.index({ schoolId: 1, periodId: 1, studentId: 1, performanceType: 1 }, { unique: true });
+// Indexes to ensure fast lookup and uniqueness per student per period/session
+StudentResultSchema.index({ schoolId: 1, periodId: 1, studentId: 1, performanceType: 1 }, { unique: true, sparse: true });
+StudentResultSchema.index({ schoolId: 1, sessionId: 1, studentId: 1, performanceType: 1 }, { sparse: true });
 
 export default mongoose.model<IStudentResult>('StudentResult', StudentResultSchema);

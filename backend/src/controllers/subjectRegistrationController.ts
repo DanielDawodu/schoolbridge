@@ -104,12 +104,14 @@ export const getStudentSubjects = async (req: AuthRequest, res: Response): Promi
       return;
     }
 
+    const orConditions: any[] = [{ studentId }];
+    if (classId) {
+      orConditions.push({ classId });
+    }
+
     const filter = addSchoolFilter(req, {
       sessionId,
-      $or: [
-        { studentId },
-        { classId },
-      ],
+      $or: orConditions,
     });
 
     const registrations = await SubjectRegistration.find(filter)

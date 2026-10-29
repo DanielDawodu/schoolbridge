@@ -17,16 +17,16 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     { name: 'Dashboard', path: '/dashboard', icon: '📊' },
     { name: 'Students', path: '/students', icon: '👨‍🎓' },
     { name: 'Classes', path: '/classes', icon: '🏫' },
-    { name: 'Staff', path: '/staff', icon: '👨‍🏫', adminOnly: true },
+    { name: 'Staff', path: '/staff', icon: '👨‍🏫', roles: ['admin'] },
     { name: 'Attendance', path: '/attendance', icon: '📋' },
-    { name: 'Fees', path: '/fees', icon: '💰', adminOnly: true },
-    { name: 'Promotion', path: '/promotion', icon: '📈', adminOnly: true },
-    { name: 'Subjects', path: '/subjects', icon: '📚', adminOnly: true },
+    { name: 'Fees', path: '/fees', icon: '💰', roles: ['admin', 'accountant'] },
+    { name: 'Promotion', path: '/promotion', icon: '📈', roles: ['admin'] },
+    { name: 'Subjects', path: '/subjects', icon: '📚', roles: ['admin'] },
     { name: 'Result Entry', path: '/result-entry', icon: '📝' },
-    { name: 'Report Cards', path: '/report-cards', icon: '📄', adminOnly: true },
-    { name: 'Half Term Report', path: '/half-term-report', icon: '�', adminOnly: true },
-    { name: 'Migration', path: '/migration', icon: '📥', adminOnly: true },
-    { name: 'Settings', path: '/settings', icon: '⚙️', adminOnly: true },
+    { name: 'Report Cards', path: '/report-cards', icon: '📄', roles: ['admin'] },
+    { name: 'Half Term Report', path: '/half-term-report', icon: '📑', roles: ['admin'] },
+    { name: 'Migration', path: '/migration', icon: '📥', roles: ['admin'] },
+    { name: 'Settings', path: '/settings', icon: '⚙️', roles: ['admin'] },
   ];
 
   return (
@@ -62,8 +62,9 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
             </div>
             <nav className="space-y-1 px-2">
               {navItems.map((item) => {
-                // Accountants can access Fees even though it's marked adminOnly
-                if (item.adminOnly && user?.role !== 'admin' && !(item.name === 'Fees' && user?.role === 'accountant')) return null;
+                if (item.roles && (!user?.role || !item.roles.includes(user.role))) {
+                  return null;
+                }
 
                 return (
                   <Link

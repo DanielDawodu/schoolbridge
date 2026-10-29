@@ -1,8 +1,8 @@
-const JWT_SECRET = process.env.JWT_SECRET;
-
 export const getJWTSecret = (): string => {
-  if (!JWT_SECRET) {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
     throw new Error('JWT_SECRET environment variable is required');
   }
-  return JWT_SECRET;
+  return secret;
 };
+
