@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { Users, School } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../services/api';
 
@@ -49,6 +51,10 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  const collectionPercent = stats.feesSummary?.totalExpected
+    ? ((stats.feesSummary.totalCollected / stats.feesSummary.totalExpected) * 100).toFixed(1)
+    : '0';
+
   return (
     <div>
       <div className="mb-8">
@@ -64,44 +70,50 @@ const Dashboard: React.FC = () => {
         </div>
       ) : (
         <>
+          {/* Student & Class Stats */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-white rounded-lg shadow p-6">
-              <div className="flex items-center">
-                <div className="flex-shrink-0">
-                  <div className="w-12 h-12 rounded-lg bg-indigo-100 flex items-center justify-center">
-                    <span className="text-2xl">👨‍🎓</span>
+            <Link to="/students" className="block">
+              <div className="bg-white rounded-lg shadow p-6 hover:shadow-md transition-shadow">
+                <div className="flex items-center">
+                  <div className="flex-shrink-0">
+                    <div className="w-12 h-12 rounded-lg bg-indigo-100 flex items-center justify-center">
+                      <Users className="w-6 h-6 text-indigo-600" />
+                    </div>
+                  </div>
+                  <div className="ml-4">
+                    <p className="text-sm font-medium text-gray-500">
+                      {user?.role === 'teacher' ? 'My Students' : 'Total Students'}
+                    </p>
+                    <p className="text-3xl font-bold text-gray-900">{stats.totalStudents}</p>
                   </div>
                 </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-500">
-                    {user?.role === 'teacher' ? 'My Students' : 'Total Students'}
-                  </p>
-                  <p className="text-3xl font-bold text-gray-900">{stats.totalStudents}</p>
-                </div>
               </div>
-            </div>
+            </Link>
 
-            <div className="bg-white rounded-lg shadow p-6">
-              <div className="flex items-center">
-                <div className="flex-shrink-0">
-                  <div className="w-12 h-12 rounded-lg bg-green-100 flex items-center justify-center">
-                    <span className="text-2xl">🏫</span>
+            <Link to="/classes" className="block">
+              <div className="bg-white rounded-lg shadow p-6 hover:shadow-md transition-shadow">
+                <div className="flex items-center">
+                  <div className="flex-shrink-0">
+                    <div className="w-12 h-12 rounded-lg bg-green-100 flex items-center justify-center">
+                      <School className="w-6 h-6 text-green-600" />
+                    </div>
+                  </div>
+                  <div className="ml-4">
+                    <p className="text-sm font-medium text-gray-500">
+                      {user?.role === 'teacher' ? 'My Classes' : 'Total Classes'}
+                    </p>
+                    <p className="text-3xl font-bold text-gray-900">{stats.totalClasses}</p>
                   </div>
                 </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-500">
-                    {user?.role === 'teacher' ? 'My Classes' : 'Total Classes'}
-                  </p>
-                  <p className="text-3xl font-bold text-gray-900">{stats.totalClasses}</p>
-                </div>
               </div>
-            </div>
+            </Link>
           </div>
 
+          {/* Today's Attendance */}
           {user?.role === 'admin' && stats.attendanceSummary && (
             <div className="mt-6 bg-white rounded-lg shadow p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Today's Attendance</h2>
-              <div className="grid grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 <div className="text-center">
                   <p className="text-3xl font-bold text-green-600">{stats.attendanceSummary.present}</p>
                   <p className="text-sm text-gray-500">Present</p>
@@ -125,6 +137,18 @@ const Dashboard: React.FC = () => {
             </div>
           )}
 
+          {/* Attendance empty state */}
+          {user?.role === 'admin' && !stats.attendanceSummary && (
+            <div className="mt-6 bg-white rounded-lg shadow p-6 text-center">
+              <h2 className="text-lg font-semibold text-gray-900 mb-2">Today's Attendance</h2>
+              <p className="text-gray-500 mb-3">Attendance has not been recorded today.</p>
+              <Link to="/attendance" className="text-indigo-600 hover:text-indigo-800 font-medium text-sm">
+                Mark Attendance →
+              </Link>
+            </div>
+          )}
+
+          {/* Fees Summary */}
           {user?.role === 'admin' && stats.feesSummary && (
             <div className="mt-6 bg-white rounded-lg shadow p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">This Term's Fees</h2>
@@ -136,16 +160,20 @@ const Dashboard: React.FC = () => {
                   <p className="text-sm text-gray-500">Expected</p>
                 </div>
                 <div className="text-center">
-                  <p className="text-3xl font-bold text-green-600">
-                    ₦{stats.feesSummary.totalCollected.toLocaleString()}
-                  </p>
-                  <p className="text-sm text-gray-500">Collected</p>
+                  <Link to="/fees" className="block hover:opacity-80">
+                    <p className="text-3xl font-bold text-green-600">
+                      ₦{stats.feesSummary.totalCollected.toLocaleString()}
+                    </p>
+                    <p className="text-sm text-gray-500">Collected</p>
+                  </Link>
                 </div>
                 <div className="text-center">
-                  <p className="text-3xl font-bold text-red-600">
-                    ₦{stats.feesSummary.totalOutstanding.toLocaleString()}
-                  </p>
-                  <p className="text-sm text-gray-500">Outstanding</p>
+                  <Link to="/fees" className="block hover:opacity-80">
+                    <p className="text-3xl font-bold text-red-600">
+                      ₦{stats.feesSummary.totalOutstanding.toLocaleString()}
+                    </p>
+                    <p className="text-sm text-gray-500">Outstanding</p>
+                  </Link>
                 </div>
                 <div className="text-center">
                   <p className="text-3xl font-bold text-purple-600">
@@ -154,9 +182,23 @@ const Dashboard: React.FC = () => {
                   <p className="text-sm text-gray-500">Credit</p>
                 </div>
               </div>
+              {/* Progress bar */}
+              <div className="mt-4">
+                <div className="flex justify-between text-sm text-gray-600 mb-1">
+                  <span>Collection Progress</span>
+                  <span>{collectionPercent}%</span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-2.5">
+                  <div
+                    className="bg-green-600 h-2.5 rounded-full transition-all"
+                    style={{ width: `${Math.min(parseFloat(collectionPercent), 100)}%` }}
+                  ></div>
+                </div>
+              </div>
             </div>
           )}
 
+          {/* Teacher Assigned Classes */}
           {user?.role === 'teacher' && assignedClasses.length > 0 && (
             <div className="mt-8 bg-white rounded-lg shadow p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">My Assigned Classes</h2>
@@ -179,25 +221,26 @@ const Dashboard: React.FC = () => {
             </div>
           )}
 
+          {/* Getting Started Checklist */}
           {user?.role === 'admin' && (
             <div className="mt-8 bg-white rounded-lg shadow p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Getting Started</h2>
               <ul className="space-y-3 text-gray-600">
                 <li className="flex items-start">
                   <span className="text-green-500 mr-2">✓</span>
-                  <span>Create your first academic session in Settings</span>
+                  <Link to="/settings" className="hover:text-indigo-600">Create your first academic session in Settings</Link>
                 </li>
                 <li className="flex items-start">
                   <span className="text-green-500 mr-2">✓</span>
-                  <span>Add classes to organize your students</span>
+                  <Link to="/classes" className="hover:text-indigo-600">Add classes to organize your students</Link>
                 </li>
                 <li className="flex items-start">
                   <span className="text-green-500 mr-2">✓</span>
-                  <span>Register students and assign them to classes</span>
+                  <Link to="/students" className="hover:text-indigo-600">Register students and assign them to classes</Link>
                 </li>
                 <li className="flex items-start">
                   <span className="text-green-500 mr-2">✓</span>
-                  <span>Create teacher accounts and assign them to classes</span>
+                  <Link to="/staff" className="hover:text-indigo-600">Create teacher accounts and assign them to classes</Link>
                 </li>
               </ul>
             </div>
