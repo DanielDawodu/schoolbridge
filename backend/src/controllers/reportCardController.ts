@@ -60,43 +60,94 @@ export const generateReportCard = async (req: AuthRequest, res: Response): Promi
       }
     }
 
+    // Grade scale with descriptions
+    const gradeScale = [
+      { min: 70, max: 100, grade: 'A', description: 'Excellent' },
+      { min: 60, max: 69, grade: 'B', description: 'Very Good' },
+      { min: 50, max: 59, grade: 'C', description: 'Good' },
+      { min: 40, max: 49, grade: 'D', description: 'Fair' },
+      { min: 0, max: 39, grade: 'F', description: 'Fail' },
+    ];
+
     // For term results on final term, fetch previous term results for comparison
     let termComparison = null;
-    if (pType === 'term' && session && session.currentTerm === session.finalTerm) {
-      // Get all term results for this student in this session
+    const finalTermName = (session?.finalTerm || 'third').toLowerCase();
+    const currentTermName = (session?.currentTerm || '').toLowerCase();
+    const isFinalTerm = currentTermName === finalTermName || currentTermName === 'third' || currentTermName.includes('3rd');
+
+    if (pType === 'term' && session && isFinalTerm) {
+      // Find all periods or sessions for this academic session
+      const sessionPeriods = await Period.find({
+        schoolId: req.user?.schoolId,
+        sessionId: session._id,
+      }).populate('termId');
+
+      const targetPeriodIds = sessionPeriods.map((p) => p._id);
+
       const filter = addSchoolFilter(req, {
-        ...buildPeriodOrSessionFilter(targetId),
+        $or: [
+          { periodId: { $in: targetPeriodIds } },
+          { sessionId: session._id },
+          { _id: targetId },
+        ],
         studentId,
         performanceType: 'term',
       });
+
       const allTermResults = await StudentResult.find(filter)
-        .populate('periodId')
+        .populate({ path: 'periodId', populate: { path: 'termId' } })
         .populate('sessionId');
 
       // Map results by term
-      const termResults: Record<string, any> = {};
+      const termResults: { first: number; second: number; third: number } = {
+        first: 0,
+        second: 0,
+        third: 0,
+      };
+
       allTermResults.forEach((r: any) => {
-        const term = r.sessionId?.currentTerm || 'term';
-        termResults[term] = r.averageScore;
+        const termName = (r.periodId?.termId?.name || r.sessionId?.currentTerm || '').toLowerCase();
+        const avg = r.averageScore || 0;
+        if (termName.includes('1st') || termName.includes('first')) {
+          termResults.first = avg;
+        } else if (termName.includes('2nd') || termName.includes('second')) {
+          termResults.second = avg;
+        } else if (termName.includes('3rd') || termName.includes('third')) {
+          termResults.third = avg;
+        }
       });
 
-      // Calculate aggregate
-      const termScores = Object.values(termResults).filter((s: any) => s > 0);
+      if (termResults.third === 0 && result.averageScore) {
+        termResults.third = result.averageScore;
+      }
+
+      const termScores = [termResults.first, termResults.second, termResults.third].filter((s) => s > 0);
       const aggregate =
         termScores.length > 0
-          ? Math.round(termScores.reduce((sum: number, s: any) => sum + s, 0) / termScores.length)
+          ? Math.round(termScores.reduce((sum: number, s: number) => sum + s, 0) / termScores.length)
           : 0;
 
       termComparison = {
-        firstTerm: termResults.first || 0,
-        secondTerm: termResults.second || 0,
-        thirdTerm: termResults.third || 0,
+        firstTerm: termResults.first,
+        secondTerm: termResults.second,
+        thirdTerm: termResults.third,
         aggregate,
       };
     }
 
+    const resultObj = result.toObject();
+    if (resultObj.subjectScores) {
+      resultObj.subjectScores = resultObj.subjectScores.map((score: any) => {
+        const gradeItem = gradeScale.find((g) => g.grade === score.grade) || { description: '' };
+        return {
+          ...score,
+          gradeDescription: gradeItem.description,
+        };
+      });
+    }
+
     res.json({
-      result,
+      result: resultObj,
       school: {
         name: school?.name,
         address: school?.address,
@@ -107,6 +158,7 @@ export const generateReportCard = async (req: AuthRequest, res: Response): Promi
         arm: classInfo?.arm,
       },
       termComparison,
+      gradeScale,
     });
   } catch (error) {
     console.error('Generate report card error:', error);

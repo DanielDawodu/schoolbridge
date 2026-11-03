@@ -86,7 +86,7 @@ const calculateAttendanceSummary = async (
 
 export const createOrUpdateResult = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { sessionId, periodId, studentId, subjectScores, psychomotorSkills, affectiveDomain, teacherComment } = req.body;
+    const { sessionId, periodId, studentId, subjectScores, psychomotorSkills, affectiveDomain, teacherComment, performanceType = "term" } = req.body;
     const targetId = periodId || sessionId;
 
     if (!targetId || !studentId) {
@@ -114,7 +114,24 @@ export const createOrUpdateResult = async (req: AuthRequest, res: Response): Pro
         const ca2Weight = subject?.ca2Weight || 20;
         const examWeight = subject?.examWeight || 60;
 
-        const total = (score.ca1 * ca1Weight) / 100 + (score.ca2 * ca2Weight) / 100 + (score.exam * examWeight) / 100;
+        let total = 0;
+        if (performanceType === 'mid-term') {
+          const caTotalWeight = ca1Weight + ca2Weight;
+          if (caTotalWeight > 0) {
+            total = Math.round(
+              (((score.ca1 || 0) * ca1Weight) / 100 + ((score.ca2 || 0) * ca2Weight) / 100) /
+                (caTotalWeight / 100)
+            );
+          } else {
+            total = Math.round(((score.ca1 || 0) + (score.ca2 || 0)) / 2);
+          }
+        } else {
+          total = Math.round(
+            ((score.ca1 || 0) * ca1Weight) / 100 +
+              ((score.ca2 || 0) * ca2Weight) / 100 +
+              ((score.exam || 0) * examWeight) / 100
+          );
+        }
         const grade = calculateGrade(total);
 
         return {
@@ -339,7 +356,24 @@ export const saveStudentResult = async (req: AuthRequest, res: Response): Promis
         const ca2Weight = subject?.ca2Weight || 20;
         const examWeight = subject?.examWeight || 60;
 
-        const total = (score.ca1 * ca1Weight) / 100 + (score.ca2 * ca2Weight) / 100 + (score.exam * examWeight) / 100;
+        let total = 0;
+        if (performanceType === 'mid-term') {
+          const caTotalWeight = ca1Weight + ca2Weight;
+          if (caTotalWeight > 0) {
+            total = Math.round(
+              (((score.ca1 || 0) * ca1Weight) / 100 + ((score.ca2 || 0) * ca2Weight) / 100) /
+                (caTotalWeight / 100)
+            );
+          } else {
+            total = Math.round(((score.ca1 || 0) + (score.ca2 || 0)) / 2);
+          }
+        } else {
+          total = Math.round(
+            ((score.ca1 || 0) * ca1Weight) / 100 +
+              ((score.ca2 || 0) * ca2Weight) / 100 +
+              ((score.exam || 0) * examWeight) / 100
+          );
+        }
         const grade = calculateGrade(total);
 
         return {
@@ -460,6 +494,104 @@ export const releaseResults = async (req: AuthRequest, res: Response): Promise<v
     });
   } catch (error) {
     console.error('Release results error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+export const getStudentAllResults = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { studentId } = req.params;
+    if (!studentId) {
+      res.status(400).json({ error: 'Student ID is required' });
+      return;
+    }
+
+    const filter = addSchoolFilter(req, { studentId });
+    const results = await StudentResult.find(filter)
+      .populate('periodId')
+      .populate('sessionId')
+      .populate('classId')
+      .sort({ createdAt: -1 });
+
+    res.json(results);
+  } catch (error) {
+    console.error('Get student all results error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+export const getClassCompletionTracker = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { sessionId, periodId, classId, performanceType } = req.query;
+    const targetId = (periodId || sessionId) as string;
+    const pType = (performanceType as string) || 'term';
+
+    if (!targetId || !classId) {
+      res.status(400).json({ error: 'Session/Period ID and class ID are required' });
+      return;
+    }
+
+    // Get all active students in the class
+    const students = await Student.find(
+      addSchoolFilter(req, { classId, status: 'active' })
+    ).sort({ fullName: 1 });
+
+    // Get all subject registrations for this class / period
+    const registrations = await SubjectRegistration.find(
+      addSchoolFilter(req, {
+        ...buildPeriodOrSessionFilter(targetId),
+        classId,
+      })
+    );
+    const totalExpectedSubjects = registrations.length;
+
+    // Get all results entered for this class and period
+    const results = await StudentResult.find(
+      addSchoolFilter(req, {
+        ...buildPeriodOrSessionFilter(targetId),
+        classId,
+        performanceType: pType,
+      })
+    );
+
+    const resultsMap = new Map<string, any>();
+    results.forEach((r) => resultsMap.set(r.studentId.toString(), r));
+
+    let completedCount = 0;
+    const studentStatusList = students.map((s) => {
+      const resRecord = resultsMap.get(s._id.toString());
+      let isComplete = false;
+      let enteredCount = 0;
+
+      if (resRecord && resRecord.subjectScores && resRecord.subjectScores.length > 0) {
+        enteredCount = resRecord.subjectScores.length;
+        isComplete = totalExpectedSubjects > 0 ? enteredCount >= totalExpectedSubjects : enteredCount > 0;
+      }
+
+      if (isComplete) completedCount++;
+
+      return {
+        studentId: s._id,
+        fullName: s.fullName,
+        admissionNo: s.admissionNo,
+        isComplete,
+        enteredCount,
+        expectedCount: totalExpectedSubjects,
+        averageScore: resRecord?.averageScore || 0,
+        verificationCode: resRecord?.verificationCode || '',
+      };
+    });
+
+    res.json({
+      totalStudents: students.length,
+      completedCount,
+      pendingCount: Math.max(0, students.length - completedCount),
+      completionPercentage:
+        students.length > 0 ? Math.round((completedCount / students.length) * 100) : 0,
+      students: studentStatusList,
+    });
+  } catch (error) {
+    console.error('Get class completion tracker error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 };

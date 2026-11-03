@@ -16,6 +16,7 @@ export const createStudent = async (req: AuthRequest, res: Response): Promise<vo
       guardianPhone,
       address,
       status,
+      statusReason,
       photoUrl,
     } = req.body;
 
@@ -45,6 +46,7 @@ export const createStudent = async (req: AuthRequest, res: Response): Promise<vo
       guardianPhone,
       address,
       status: status || 'active',
+      statusReason: statusReason || '',
       photoUrl,
     });
     await student.save();
@@ -59,7 +61,7 @@ export const createStudent = async (req: AuthRequest, res: Response): Promise<vo
 
 export const getStudents = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { classId, status } = req.query;
+    const { classId, status, activeOnly } = req.query;
     let filter = addSchoolFilter(req);
     
     // If user is a teacher, filter by their assigned classes
@@ -80,8 +82,10 @@ export const getStudents = async (req: AuthRequest, res: Response): Promise<void
       filter.classId = classId;
     }
     
-    if (status) {
+    if (status && status !== 'all') {
       filter.status = status;
+    } else if (activeOnly === 'true' && !status) {
+      filter.status = 'active';
     }
 
     const students = await Student.find(filter).populate('classId').sort({ fullName: 1 });
@@ -123,6 +127,7 @@ export const updateStudent = async (req: AuthRequest, res: Response): Promise<vo
       guardianPhone,
       address,
       status,
+      statusReason,
       photoUrl,
     } = req.body;
 
@@ -153,6 +158,7 @@ export const updateStudent = async (req: AuthRequest, res: Response): Promise<vo
         guardianPhone,
         address,
         status,
+      statusReason,
         photoUrl,
       },
       { new: true }
@@ -166,6 +172,35 @@ export const updateStudent = async (req: AuthRequest, res: Response): Promise<vo
     res.json(student);
   } catch (error) {
     console.error('Update student error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+export const updateStudentStatus = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { status, statusReason } = req.body;
+
+    if (!status || !['active', 'inactive', 'withdrawn', 'graduated'].includes(status)) {
+      res.status(400).json({ error: 'Valid status (active, inactive, withdrawn, graduated) is required' });
+      return;
+    }
+
+    const filter = addSchoolFilter(req, { _id: id });
+    const student = await Student.findOneAndUpdate(
+      filter,
+      { status, statusReason: statusReason || '' },
+      { new: true }
+    ).populate('classId');
+
+    if (!student) {
+      res.status(404).json({ error: 'Student not found' });
+      return;
+    }
+
+    res.json(student);
+  } catch (error) {
+    console.error('Update student status error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 };

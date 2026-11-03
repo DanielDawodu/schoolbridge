@@ -6,6 +6,8 @@ import {
   saveStudentResult,
   getStudentResult,
   getStudentTermResults,
+  getStudentAllResults,
+  getClassCompletionTracker,
   getClassResults,
   updateHeadOfSchoolComment,
   releaseResults,
@@ -24,6 +26,12 @@ router.post('/save', saveStudentResult);
 
 // Get student result
 router.get('/student', getStudentResult);
+
+// Get all historical results for a student across all sessions
+router.get('/student/:studentId/all', getStudentAllResults);
+
+// Get report completion tracker for a class
+router.get('/completion', getClassCompletionTracker);
 
 // Get student term results (for term-over-term comparison)
 router.get('/student/terms', getStudentTermResults);

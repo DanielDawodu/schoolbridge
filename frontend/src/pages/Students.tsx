@@ -12,6 +12,7 @@ interface Student {
   guardianPhone: string;
   address: string;
   status: string;
+  statusReason?: string;
   photoUrl?: string;
   classGroup?: {
     _id: string;
@@ -36,7 +37,11 @@ const Students: React.FC = () => {
   const [viewingStudent, setViewingStudent] = useState<Student | null>(null);
   const [studentAttendance, setStudentAttendance] = useState<any>(null);
   const [studentFees, setStudentFees] = useState<any>(null);
+  const [studentResults, setStudentResults] = useState<any[]>([]);
   const [filterClass, setFilterClass] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive' | 'withdrawn' | 'graduated'>('all');
+  const [statusModalStudent, setStatusModalStudent] = useState<Student | null>(null);
+  const [statusFormData, setStatusFormData] = useState<{ status: string; statusReason: string }>({ status: 'active', statusReason: '' });
   const [formData, setFormData] = useState({
     fullName: '',
     admissionNo: '',
@@ -114,18 +119,41 @@ const Students: React.FC = () => {
     setShowModal(true);
   };
 
+  const openStatusModal = (student: Student) => {
+    setStatusModalStudent(student);
+    setStatusFormData({
+      status: student.status || 'active',
+      statusReason: student.statusReason || '',
+    });
+  };
+
+  const handleStatusSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!statusModalStudent) return;
+    try {
+      await api.put(`/students/${statusModalStudent._id}/status`, statusFormData);
+      setStatusModalStudent(null);
+      fetchData();
+    } catch (error: any) {
+      alert(error.response?.data?.error || 'Failed to update student status');
+    }
+  };
+
   const handleView = async (student: Student) => {
     setViewingStudent(student);
     setShowViewModal(true);
+    setStudentResults([]);
     
-    // Fetch attendance and fees for the student
+    // Fetch attendance, fees, and results archive for the student
     try {
-      const [attendanceRes, feesRes] = await Promise.all([
+      const [attendanceRes, feesRes, resultsRes] = await Promise.all([
         api.get(`/attendance/student/${student._id}`),
         api.get(`/fees/student/${student._id}`),
+        api.get(`/results/student/${student._id}/all`),
       ]);
       setStudentAttendance(attendanceRes.data);
       setStudentFees(feesRes.data);
+      setStudentResults(resultsRes.data || []);
     } catch (error) {
       console.error('Failed to fetch student details:', error);
     }
@@ -192,6 +220,50 @@ const Students: React.FC = () => {
         </div>
       </div>
 
+      {/* Status Filter Tabs */}
+      <div className="flex flex-wrap gap-2 mb-4 border-b border-gray-200 pb-3">
+        {(['all', 'active', 'inactive', 'withdrawn', 'graduated'] as const).map((tab) => {
+          const count = tab === 'all'
+            ? students.length
+            : students.filter(s => (s.status || 'active') === tab).length;
+          return (
+            <button
+              key={tab}
+              onClick={() => setStatusFilter(tab)}
+              className={`px-3 py-1.5 rounded-md text-sm font-medium capitalize transition-colors ${
+                statusFilter === tab
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-300'
+              }`}
+            >
+              {tab} ({count})
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Status Filter Tabs */}
+      <div className="flex flex-wrap gap-2 mb-4 border-b border-gray-200 pb-3">
+        {(['all', 'active', 'inactive', 'withdrawn', 'graduated'] as const).map((tab) => {
+          const count = tab === 'all'
+            ? students.length
+            : students.filter(s => (s.status || 'active') === tab).length;
+          return (
+            <button
+              key={tab}
+              onClick={() => setStatusFilter(tab)}
+              className={`px-3 py-1.5 rounded-md text-sm font-medium capitalize transition-colors ${
+                statusFilter === tab
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-300'
+              }`}
+            >
+              {tab} ({count})
+            </button>
+          );
+        })}
+      </div>
+
       {students.length === 0 ? (
         <div className="bg-white rounded-lg shadow p-12 text-center">
           <p className="text-gray-500 mb-4">No students found</p>
@@ -229,7 +301,9 @@ const Students: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {students.map((student) => (
+                {students
+                .filter(s => statusFilter === 'all' || (s.status || 'active') === statusFilter)
+                .map((student) => (
                   <tr key={student._id}>
                     <td className="px-6 py-4 whitespace-nowrap">
                       {student.photoUrl ? (
@@ -258,10 +332,14 @@ const Students: React.FC = () => {
                         className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
                           student.status === 'active'
                             ? 'bg-green-100 text-green-800'
+                            : student.status === 'graduated'
+                            ? 'bg-purple-100 text-purple-800'
+                            : student.status === 'withdrawn'
+                            ? 'bg-amber-100 text-amber-800'
                             : 'bg-red-100 text-red-800'
                         }`}
                       >
-                        {student.status}
+                        {student.status || 'active'}
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
@@ -270,6 +348,18 @@ const Students: React.FC = () => {
                         className="text-gray-600 hover:text-gray-900 mr-3"
                       >
                         View
+                      </button>
+                      <button
+                        onClick={() => openStatusModal(student)}
+                        className="text-amber-600 hover:text-amber-900 mr-3"
+                      >
+                        Status
+                      </button>
+                      <button
+                        onClick={() => openStatusModal(student)}
+                        className="text-amber-600 hover:text-amber-900 mr-3"
+                      >
+                        Status
                       </button>
                       <button
                         onClick={() => handleEdit(student)}
@@ -514,6 +604,114 @@ const Students: React.FC = () => {
         </div>
       )}
 
+      {/* Exit Student / Update Status Modal */}
+      {statusModalStudent && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">
+              Update Status: {statusModalStudent.fullName}
+            </h3>
+            <p className="text-sm text-gray-500 mb-4">
+              Change student enrollment status (e.g. withdraw or graduate).
+            </p>
+            <form onSubmit={handleStatusSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                <select
+                  value={statusFormData.status}
+                  onChange={(e) => setStatusFormData({ ...statusFormData, status: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                >
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                  <option value="withdrawn">Withdrawn</option>
+                  <option value="graduated">Graduated</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Reason / Note (optional)</label>
+                <textarea
+                  rows={3}
+                  placeholder="e.g. Completed SSS 3, Relocated, Transferred..."
+                  value={statusFormData.statusReason}
+                  onChange={(e) => setStatusFormData({ ...statusFormData, statusReason: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                />
+              </div>
+              <div className="flex justify-end space-x-3 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setStatusModalStudent(null)}
+                  className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
+                >
+                  Save Status
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Exit Student / Update Status Modal */}
+      {statusModalStudent && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">
+              Update Status: {statusModalStudent.fullName}
+            </h3>
+            <p className="text-sm text-gray-500 mb-4">
+              Change student enrollment status (e.g. withdraw or graduate).
+            </p>
+            <form onSubmit={handleStatusSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                <select
+                  value={statusFormData.status}
+                  onChange={(e) => setStatusFormData({ ...statusFormData, status: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                >
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                  <option value="withdrawn">Withdrawn</option>
+                  <option value="graduated">Graduated</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Reason / Note (optional)</label>
+                <textarea
+                  rows={3}
+                  placeholder="e.g. Completed SSS 3, Relocated, Transferred..."
+                  value={statusFormData.statusReason}
+                  onChange={(e) => setStatusFormData({ ...statusFormData, statusReason: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                />
+              </div>
+              <div className="flex justify-end space-x-3 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setStatusModalStudent(null)}
+                  className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
+                >
+                  Save Status
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* View Modal */}
       {showViewModal && viewingStudent && (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -612,6 +810,94 @@ const Students: React.FC = () => {
                   </div>
                 </div>
               )}
+
+              {/* Historical Results Archive */}
+              <div className="mt-6 pt-6 border-t">
+                <h4 className="text-lg font-semibold text-gray-900 mb-4">Historical Results Archive</h4>
+                {studentResults.length === 0 ? (
+                  <p className="text-gray-500 text-sm">No recorded results found for this student.</p>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {studentResults.map((r: any) => (
+                      <div key={r._id} className="border border-gray-200 rounded-lg p-3 bg-gray-50 flex flex-col justify-between">
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="font-semibold text-gray-900 text-sm">
+                              {r.sessionId?.year || 'Academic Year'} ({r.sessionId?.currentTerm ? `${r.sessionId.currentTerm} Term` : ''})
+                            </span>
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                              r.performanceType === 'mid-term'
+                                ? 'bg-blue-100 text-blue-800'
+                                : 'bg-indigo-100 text-indigo-800'
+                            }`}>
+                              {r.performanceType === 'mid-term' ? 'Mid-Term' : 'Full Term'}
+                            </span>
+                          </div>
+                          <p className="text-xs text-gray-600">
+                            Average Score: <strong className="text-gray-800">{r.averageScore}%</strong>
+                            {r.classPosition && <> | Position: <strong className="text-gray-800">{r.classPosition}</strong></>}
+                          </p>
+                          {r.verificationCode && (
+                            <p className="text-xs font-mono text-indigo-600 mt-1">Code: {r.verificationCode}</p>
+                          )}
+                        </div>
+                        <div className="mt-3 pt-2 border-t flex justify-end">
+                          <a
+                            href={r.performanceType === 'mid-term' ? '/half-term-report' : '/report-cards'}
+                            className="text-xs bg-indigo-600 text-white px-2.5 py-1 rounded hover:bg-indigo-700"
+                          >
+                            View / Reprint
+                          </a>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Historical Results Archive */}
+              <div className="mt-6 pt-6 border-t">
+                <h4 className="text-lg font-semibold text-gray-900 mb-4">Historical Results Archive</h4>
+                {studentResults.length === 0 ? (
+                  <p className="text-gray-500 text-sm">No recorded results found for this student.</p>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {studentResults.map((r: any) => (
+                      <div key={r._id} className="border border-gray-200 rounded-lg p-3 bg-gray-50 flex flex-col justify-between">
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="font-semibold text-gray-900 text-sm">
+                              {r.sessionId?.year || 'Academic Year'} ({r.sessionId?.currentTerm ? `${r.sessionId.currentTerm} Term` : ''})
+                            </span>
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                              r.performanceType === 'mid-term'
+                                ? 'bg-blue-100 text-blue-800'
+                                : 'bg-indigo-100 text-indigo-800'
+                            }`}>
+                              {r.performanceType === 'mid-term' ? 'Mid-Term' : 'Full Term'}
+                            </span>
+                          </div>
+                          <p className="text-xs text-gray-600">
+                            Average Score: <strong className="text-gray-800">{r.averageScore}%</strong>
+                            {r.classPosition && <> | Position: <strong className="text-gray-800">{r.classPosition}</strong></>}
+                          </p>
+                          {r.verificationCode && (
+                            <p className="text-xs font-mono text-indigo-600 mt-1">Code: {r.verificationCode}</p>
+                          )}
+                        </div>
+                        <div className="mt-3 pt-2 border-t flex justify-end">
+                          <a
+                            href={r.performanceType === 'mid-term' ? '/half-term-report' : '/report-cards'}
+                            className="text-xs bg-indigo-600 text-white px-2.5 py-1 rounded hover:bg-indigo-700"
+                          >
+                            View / Reprint
+                          </a>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               {/* Fees Section */}
               {studentFees && (

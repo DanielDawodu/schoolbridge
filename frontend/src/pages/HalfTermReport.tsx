@@ -16,6 +16,7 @@ interface StudentResult {
   subjectScores: SubjectScore[];
   teacherComment: string;
   headOfSchoolComment: string;
+  verificationCode?: string;
 }
 
 interface Student {
@@ -34,7 +35,8 @@ interface AcademicSession {
 
 interface ClassGroup {
   _id: string;
-  name: string;
+  name?: string;
+  classLevelId?: string | { _id: string; name: string };
   arm: string;
 }
 
@@ -170,11 +172,14 @@ const HalfTermReport: React.FC = () => {
               disabled={!selectedSession}
             >
               <option value="">Select class</option>
-              {classes.map((c) => (
-                <option key={c._id} value={c._id}>
-                  {c.name} - {c.arm}
-                </option>
-              ))}
+              {classes.map((c) => {
+                const classLevelName = typeof c.classLevelId === 'object' ? c.classLevelId?.name : (c.name || 'Unknown');
+                return (
+                  <option key={c._id} value={c._id}>
+                    {classLevelName} - {c.arm}
+                  </option>
+                );
+              })}
             </select>
           </div>
           <div>
@@ -226,7 +231,15 @@ const HalfTermReport: React.FC = () => {
             <div className="flex-1">
               <h3 className="text-lg font-semibold text-gray-900">{selectedStudentData.fullName}</h3>
               <p className="text-sm text-gray-600">Admission No: {selectedStudentData.admissionNo}</p>
-              <p className="text-sm text-gray-600">Class: {selectedClassData.name} - {selectedClassData.arm}</p>
+              {(() => {
+                const classLevelName = typeof selectedClassData.classLevelId === 'object' ? (selectedClassData.classLevelId as any)?.name : (selectedClassData.name || 'Unknown');
+                return <p className="text-sm text-gray-600">Class: {classLevelName} - {selectedClassData.arm}</p>;
+              })()}
+              {result.verificationCode && (
+                <p className="text-sm text-indigo-700 font-mono font-semibold mt-1">
+                  Verification Code: {result.verificationCode}
+                </p>
+              )}
               <p className="text-sm text-gray-600">Session: {selectedSessionData.year} ({selectedSessionData.currentTerm} Term)</p>
             </div>
           </div>

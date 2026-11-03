@@ -1,4 +1,4 @@
-import mongoose, { Schema, Document } from 'mongoose';
+import mongoose, { Document, Schema } from 'mongoose';
 
 export interface ISubjectScore {
   subjectId: mongoose.Types.ObjectId;
@@ -8,7 +8,7 @@ export interface ISubjectScore {
   exam: number;
   total: number;
   grade: string;
-  position: number;
+  position?: number;
 }
 
 export interface IPsychomotorRating {
@@ -21,12 +21,18 @@ export interface IAffectiveRating {
   rating: number; // 1-5
 }
 
+export interface IAttendanceSummary {
+  daysOpen: number;
+  daysPresent: number;
+  daysAbsent: number;
+}
+
 export interface IStudentResult extends Document {
   schoolId: mongoose.Types.ObjectId;
-  periodId: mongoose.Types.ObjectId;
+  periodId?: mongoose.Types.ObjectId;
   sessionId?: mongoose.Types.ObjectId;
   studentId: mongoose.Types.ObjectId;
-  classId: mongoose.Types.ObjectId;
+  classId?: mongoose.Types.ObjectId;
   performanceType: 'mid-term' | 'term';
   verificationCode: string;
   subjectScores: ISubjectScore[];
@@ -39,11 +45,7 @@ export interface IStudentResult extends Document {
   averageScore: number;
   classPosition: number;
   classAverage: number;
-  attendanceSummary: {
-    daysOpen: number;
-    daysPresent: number;
-    daysAbsent: number;
-  };
+  attendanceSummary: IAttendanceSummary;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -60,26 +62,31 @@ const SubjectScoreSchema = new Schema({
   },
   ca1: {
     type: Number,
-    default: 0,
+    required: true,
     min: 0,
+    max: 100,
   },
   ca2: {
     type: Number,
-    default: 0,
+    required: true,
     min: 0,
+    max: 100,
   },
   exam: {
     type: Number,
-    default: 0,
+    required: true,
     min: 0,
+    max: 100,
   },
   total: {
     type: Number,
-    default: 0,
+    required: true,
+    min: 0,
+    max: 100,
   },
   grade: {
     type: String,
-    default: '',
+    required: true,
   },
   position: {
     type: Number,
@@ -128,6 +135,12 @@ const AttendanceSummarySchema = new Schema({
   },
 });
 
+export const generateVerificationCode = (): string => {
+  const timestamp = Date.now().toString(36).toUpperCase();
+  const random = Math.random().toString(36).substring(2, 6).toUpperCase();
+  return `SR${timestamp}${random}`.substring(0, 10);
+};
+
 const StudentResultSchema: Schema = new Schema({
   schoolId: {
     type: Schema.Types.ObjectId,
@@ -152,7 +165,7 @@ const StudentResultSchema: Schema = new Schema({
   classId: {
     type: Schema.Types.ObjectId,
     ref: 'ClassGroup',
-    required: true,
+    required: false,
   },
   performanceType: {
     type: String,
@@ -163,7 +176,7 @@ const StudentResultSchema: Schema = new Schema({
   verificationCode: {
     type: String,
     unique: true,
-    required: true,
+    default: generateVerificationCode,
   },
   subjectScores: [SubjectScoreSchema],
   psychomotorSkills: [PsychomotorRatingSchema],
@@ -210,15 +223,18 @@ const StudentResultSchema: Schema = new Schema({
   },
 });
 
+StudentResultSchema.pre('validate', function (this: any) {
+  if (!this.verificationCode) {
+    this.verificationCode = generateVerificationCode();
+  }
+});
+
 StudentResultSchema.pre('save', function (this: any, next: any) {
   if (!this.isNew) {
     this.updatedAt = new Date();
   }
-  // Generate verification code if not set
-  if (this.isNew && !this.verificationCode) {
-    const timestamp = Date.now().toString(36).toUpperCase();
-    const random = Math.random().toString(36).substring(2, 8).toUpperCase();
-    this.verificationCode = `SR${timestamp}${random}`;
+  if (!this.verificationCode) {
+    this.verificationCode = generateVerificationCode();
   }
   if (typeof next === 'function') {
     next();

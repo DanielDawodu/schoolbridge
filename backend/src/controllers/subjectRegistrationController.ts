@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import SubjectRegistration from '../models/SubjectRegistration';
 import Subject from '../models/Subject';
+import Period from '../models/Period';
 import { AuthRequest } from '../middleware/auth';
 import { addSchoolFilter } from '../middleware/multiTenant';
 
@@ -104,13 +105,27 @@ export const getStudentSubjects = async (req: AuthRequest, res: Response): Promi
       return;
     }
 
+    const sessionStr = String(sessionId);
+    const sessionIds: any[] = [sessionStr];
+    try {
+      const period: any = await Period.findOne({ _id: sessionStr } as any);
+      if (period) {
+        sessionIds.push(period.sessionId);
+      } else {
+        const periods: any[] = await Period.find({ sessionId: sessionStr } as any);
+        periods.forEach((p) => sessionIds.push(p._id));
+      }
+    } catch {
+      // In case sessionStr is not an ObjectId
+    }
+
     const orConditions: any[] = [{ studentId }];
     if (classId) {
       orConditions.push({ classId });
     }
 
     const filter = addSchoolFilter(req, {
-      sessionId,
+      sessionId: { $in: sessionIds },
       $or: orConditions,
     });
 

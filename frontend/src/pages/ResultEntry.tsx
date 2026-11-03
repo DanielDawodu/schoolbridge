@@ -32,6 +32,7 @@ interface Student {
   admissionNo: string;
   classId: string;
   photo?: string;
+  status?: string;
 }
 
 interface AcademicSession {
@@ -95,7 +96,14 @@ const calculateGrade = (score: number): string => {
   return 'F';
 };
 
-const calculateTotal = (ca1: number, ca2: number, exam: number, subject: Subject): number => {
+const calculateTotal = (ca1: number, ca2: number, exam: number, subject: Subject, isMidTerm: boolean = false): number => {
+  if (isMidTerm) {
+    const caTotalWeight = (subject.ca1Weight || 20) + (subject.ca2Weight || 20);
+    if (caTotalWeight > 0) {
+      return Math.round(((ca1 * (subject.ca1Weight || 20) / 100) + (ca2 * (subject.ca2Weight || 20) / 100)) / (caTotalWeight / 100));
+    }
+    return Math.round((ca1 + ca2) / 2);
+  }
   const total = (ca1 * subject.ca1Weight / 100) + (ca2 * subject.ca2Weight / 100) + (exam * subject.examWeight / 100);
   return Math.round(total);
 };
@@ -116,6 +124,7 @@ const ResultEntry: React.FC = () => {
   const [headOfSchoolComment, setHeadOfSchoolComment] = useState('');
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [performanceType, setPerformanceType] = useState<'mid-term' | 'term'>('term');
+  const [verificationCode, setVerificationCode] = useState<string>('');
 
   useEffect(() => {
     fetchCurrentUser();
@@ -174,7 +183,7 @@ const ResultEntry: React.FC = () => {
     try {
       setLoading(true);
       const response = await api.get('/students');
-      const classStudents = response.data.filter((s: Student) => s.classId.toString() === selectedClass.toString());
+      const classStudents = response.data.filter((s: Student) => s.classId.toString() === selectedClass.toString() && (s.status === 'active' || !s.status));
       setStudents(classStudents);
     } catch (error) {
       console.error('Failed to fetch students:', error);
@@ -230,6 +239,9 @@ const ResultEntry: React.FC = () => {
         setAffectiveDomain(response.data.affectiveDomain || []);
         setTeacherComment(response.data.teacherComment || '');
         setHeadOfSchoolComment(response.data.headOfSchoolComment || '');
+        setVerificationCode(response.data.verificationCode || '');
+      } else {
+        setVerificationCode('');
       }
     } catch (error) {
       // No existing result is fine
@@ -243,7 +255,7 @@ const ResultEntry: React.FC = () => {
     const updatedScores = { ...subjectScores };
     const score = { ...updatedScores[subjectId] };
     score[field] = Math.max(0, Math.min(100, value));
-    score.total = calculateTotal(score.ca1, score.ca2, score.exam, registration.subjectId);
+    score.total = calculateTotal(score.ca1, score.ca2, score.exam, registration.subjectId, performanceType === 'mid-term');
     score.grade = calculateGrade(score.total);
     updatedScores[subjectId] = score;
     setSubjectScores(updatedScores);
@@ -274,7 +286,7 @@ const ResultEntry: React.FC = () => {
     try {
       setLoading(true);
       const scoresArray = Object.values(subjectScores);
-      await api.post('/results/save', {
+      const saveRes = await api.post('/results/save', {
         sessionId: selectedSession,
         studentId: selectedStudent,
         subjectScores: scoresArray,
@@ -284,6 +296,9 @@ const ResultEntry: React.FC = () => {
         headOfSchoolComment: currentUser?.role === 'admin' ? headOfSchoolComment : undefined,
         performanceType,
       });
+      if (saveRes.data?.result?.verificationCode) {
+        setVerificationCode(saveRes.data.result.verificationCode);
+      }
       alert('Result saved successfully');
       await fetchExistingResult();
     } catch (error: any) {
@@ -392,6 +407,21 @@ const ResultEntry: React.FC = () => {
               <div>
                 <h2 className="text-lg font-semibold text-gray-900">{selectedStudentData.fullName}</h2>
                 <p className="text-sm text-gray-500">Admission No: {selectedStudentData.admissionNo}</p>
+                {verificationCode && (
+                  <div className="mt-2 inline-flex items-center space-x-2 bg-indigo-50 border border-indigo-200 text-indigo-700 px-3 py-1 rounded-full text-xs font-mono font-semibold">
+                    <span>Verification Code: {verificationCode}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(verificationCode);
+                        alert('Verification code copied to clipboard!');
+                      }}
+                      className="ml-2 underline hover:text-indigo-900 cursor-pointer"
+                    >
+                      Copy
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>

@@ -112,7 +112,7 @@ const ReportCard: React.FC = () => {
         <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${score.ca2}</td>
         <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${score.exam}</td>
         <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${score.total}</td>
-        <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${score.grade}</td>
+        <td style="padding: 8px; border: 1px solid #ddd; text-align: center;"><strong>${score.grade}</strong>${(score as any).gradeDescription ? ` <span style="font-size: 11px; color: #4b5563;">(${(score as any).gradeDescription})</span>` : ''}</td>
         <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${score.position}</td>
       </tr>
     `).join('');
@@ -227,6 +227,10 @@ const ReportCard: React.FC = () => {
                 <td>Student Average:</td>
                 <td>${result.averageScore}%</td>
               </tr>
+              <tr>
+                <td>Verification Code:</td>
+                <td><span style="font-family: monospace; font-weight: bold; background: #eef2ff; color: #4338ca; padding: 2px 6px; border-radius: 4px;">${result.verificationCode || 'N/A'}</span></td>
+              </tr>
             </table>
           </div>
         </div>
@@ -289,6 +293,32 @@ const ReportCard: React.FC = () => {
           </thead>
           <tbody>
             ${affectiveRows}
+          </tbody>
+        </table>
+
+        <div class="section-title">GRADE SCALE LEGEND</div>
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 12px;">
+          <thead>
+            <tr style="background: #f9fafb;">
+              <th style="padding: 6px; border: 1px solid #ddd; text-align: center;">Grade</th>
+              <th style="padding: 6px; border: 1px solid #ddd; text-align: center;">Score Range</th>
+              <th style="padding: 6px; border: 1px solid #ddd;">Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${(reportData.gradeScale || [
+              { grade: 'A', min: 70, max: 100, description: 'Excellent' },
+              { grade: 'B', min: 60, max: 69, description: 'Very Good' },
+              { grade: 'C', min: 50, max: 59, description: 'Good' },
+              { grade: 'D', min: 40, max: 49, description: 'Fair' },
+              { grade: 'F', min: 0, max: 39, description: 'Fail' }
+            ]).map((g: any) => `
+              <tr>
+                <td style="padding: 6px; border: 1px solid #ddd; text-align: center; font-weight: bold;">${g.grade}</td>
+                <td style="padding: 6px; border: 1px solid #ddd; text-align: center;">${g.min}% - ${g.max}%</td>
+                <td style="padding: 6px; border: 1px solid #ddd;">${g.description}</td>
+              </tr>
+            `).join('')}
           </tbody>
         </table>
 
@@ -436,6 +466,24 @@ const ReportCard: React.FC = () => {
             <div>
               <strong>Released:</strong> {reportData.result.isReleased ? 'Yes' : 'No'}
             </div>
+            {reportData.result.verificationCode && (
+              <div className="flex items-center space-x-2 pt-2 border-t">
+                <strong>Verification Code:</strong>
+                <span className="bg-indigo-50 border border-indigo-200 px-3 py-1 rounded font-mono font-bold text-indigo-700">
+                  {reportData.result.verificationCode}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(reportData.result.verificationCode);
+                    alert('Copied verification code!');
+                  }}
+                  className="text-xs bg-indigo-600 text-white px-2 py-1 rounded hover:bg-indigo-700 cursor-pointer"
+                >
+                  Copy Code
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

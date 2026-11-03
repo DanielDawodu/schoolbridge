@@ -131,7 +131,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   };
 
   return (
-    <div className="flex min-h-screen bg-gray-50">
+    <div className="flex h-screen overflow-hidden bg-gray-50">
       {/* Mobile backdrop overlay */}
       {sidebarOpen && (
         <div
@@ -342,9 +342,9 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         </div>
       </aside>
 
-      {/* Main content wrapper */}
+      {/* Main content wrapper with independent scroll */}
       <div
-        className={`flex-1 min-w-0 transition-all duration-300 ease-in-out ${
+        className={`flex-1 flex flex-col h-screen overflow-y-auto min-w-0 transition-all duration-300 ease-in-out ${
           isCollapsed ? 'lg:ml-20' : 'lg:ml-64'
         }`}
       >

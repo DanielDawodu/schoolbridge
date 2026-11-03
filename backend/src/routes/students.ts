@@ -4,6 +4,7 @@ import {
   getStudents,
   getStudent,
   updateStudent,
+  updateStudentStatus,
   deleteStudent,
 } from '../controllers/studentController';
 import { authenticate } from '../middleware/auth';
@@ -16,6 +17,7 @@ router.post('/', authenticate, requireAdmin, createStudent);
 router.get('/', authenticate, requireTeacherOrAdmin, getStudents);
 router.get('/:id', authenticate, requireTeacherOrAdmin, requireStudentAccess, getStudent);
 router.put('/:id', authenticate, requireAdmin, updateStudent);
+router.put('/:id/status', authenticate, requireAdmin, updateStudentStatus);
 router.delete('/:id', authenticate, requireAdmin, deleteStudent);
 
 export default router;
