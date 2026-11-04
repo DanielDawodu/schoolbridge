@@ -23,7 +23,8 @@ interface Student {
 
 interface ClassGroup {
   _id: string;
-  name: string;
+  name?: string;
+  classLevelId?: { _id: string; name: string } | string;
   arm: string;
 }
 
@@ -325,7 +326,20 @@ const Students: React.FC = () => {
                       {student.admissionNo}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {student.classGroup?.name} - {student.classGroup?.arm}
+                      {(() => {
+                        const cObj: any = student.classGroup || student.classId;
+                        if (!cObj) return '—';
+                        if (typeof cObj === 'object') {
+                          const lvlName = typeof cObj.classLevelId === 'object' ? cObj.classLevelId?.name : (cObj.name || 'Class');
+                          return `${lvlName} - ${cObj.arm || ''}`;
+                        }
+                        const matched = classes.find(c => c._id === cObj);
+                        if (matched) {
+                          const lvl = typeof matched.classLevelId === 'object' ? (matched.classLevelId as any)?.name : (matched.name || 'Class');
+                          return `${lvl} - ${matched.arm}`;
+                        }
+                        return cObj;
+                      })()}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
                       <span
@@ -406,12 +420,28 @@ const Students: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Admission Number
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-sm font-medium text-gray-700">
+                      Admission Number
+                    </label>
+                    {!editingStudent && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const year = new Date().getFullYear();
+                          const rand = Math.floor(100 + Math.random() * 900);
+                          setFormData({ ...formData, admissionNo: `ADM/${year}/${rand}` });
+                        }}
+                        className="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+                      >
+                        Auto-generate
+                      </button>
+                    )}
+                  </div>
                   <input
                     type="text"
                     required
+                    placeholder="e.g. ADM/2026/001"
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
                     value={formData.admissionNo}
                     onChange={(e) => setFormData({ ...formData, admissionNo: e.target.value })}
@@ -426,11 +456,14 @@ const Students: React.FC = () => {
                     onChange={(e) => setFormData({ ...formData, classId: e.target.value })}
                   >
                     <option value="">Select a class</option>
-                    {classes.map((cls) => (
-                      <option key={cls._id} value={cls._id}>
-                        {cls.name} - {cls.arm}
-                      </option>
-                    ))}
+                    {classes.map((cls) => {
+                      const levelName = typeof cls.classLevelId === 'object' ? (cls.classLevelId as any)?.name : (cls.name || 'Class');
+                      return (
+                        <option key={cls._id} value={cls._id}>
+                          {levelName} - {cls.arm}
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
                 <div>

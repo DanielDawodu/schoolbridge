@@ -48,7 +48,7 @@ interface Student {
   _id: string;
   fullName: string;
   admissionNo: string;
-  classId: string;
+  classId: any;
   photo?: string;
   status?: string;
 }
@@ -245,9 +245,20 @@ const ResultEntry: React.FC = () => {
         }).catch(() => ({ data: { students: [] } })),
       ]);
 
-      const classStudents = (studentsRes.data || []).filter(
-        (s: Student) => s.classId?.toString() === cls._id.toString() && (s.status === 'active' || !s.status)
-      );
+      const getStudentClassId = (s: any): string => {
+        if (!s || !s.classId) return '';
+        if (typeof s.classId === 'object') {
+          return s.classId._id ? s.classId._id.toString() : '';
+        }
+        return s.classId.toString();
+      };
+
+      const classStudents = (studentsRes.data || []).filter((s: any) => {
+        const sClassId = getStudentClassId(s);
+        const matchesClass = !cls._id || sClassId === cls._id.toString();
+        const isActive = s.status === 'active' || !s.status;
+        return matchesClass && isActive;
+      });
       setStudents(classStudents);
 
       const cMap: Record<string, any> = {};

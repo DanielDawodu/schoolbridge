@@ -1,3 +1,5 @@
+import SubjectRegistration from '../models/SubjectRegistration';
+import ClassGroup from '../models/ClassGroup';
 import { Response } from 'express';
 import Student from '../models/Student';
 import User from '../models/User';
@@ -20,42 +22,79 @@ export const createStudent = async (req: AuthRequest, res: Response): Promise<vo
       photoUrl,
     } = req.body;
 
-    if (!fullName || !admissionNo || !classId || !gender || !dateOfBirth || !guardianName || !guardianPhone || !address) {
-      res.status(400).json({ error: 'All required fields must be provided' });
+    if (!fullName || !classId || !gender || !dateOfBirth || !guardianName || !guardianPhone || !address) {
+      res.status(400).json({
+        error: 'All required fields (Name, Class, Gender, Date of Birth, Guardian Name, Guardian Phone, Address) must be provided'
+      });
       return;
     }
 
+    // Verify class exists in school
+    const classGroup = await ClassGroup.findOne({
+      _id: classId,
+      schoolId: req.user?.schoolId,
+    });
+    if (!classGroup) {
+      res.status(400).json({ error: 'Selected class does not exist in this school' });
+      return;
+    }
+
+    // Auto-generate admission number if missing/blank
+    let finalAdmissionNo = (admissionNo || '').trim();
+    if (!finalAdmissionNo) {
+      const year = new Date().getFullYear();
+      const count = await Student.countDocuments({ schoolId: req.user?.schoolId });
+      let seq = count + 1;
+      let candidate = `ADM/${year}/${String(seq).padStart(3, '0')}`;
+      while (await Student.findOne({ schoolId: req.user?.schoolId, admissionNo: candidate })) {
+        seq++;
+        candidate = `ADM/${year}/${String(seq).padStart(3, '0')}`;
+      }
+      finalAdmissionNo = candidate;
+    }
+
+    // Check duplicate admission number case-insensitively
     const existingStudent = await Student.findOne({
       schoolId: req.user?.schoolId,
-      admissionNo,
+      admissionNo: { $regex: new RegExp(`^${finalAdmissionNo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
     });
 
     if (existingStudent) {
-      res.status(400).json({ error: 'Admission number already exists in this school' });
+      res.status(400).json({
+        error: `Admission number "${finalAdmissionNo}" already exists in this school. Please use a unique admission number.`
+      });
       return;
     }
 
     const student = new Student({
       schoolId: req.user?.schoolId,
-      fullName,
-      admissionNo,
+      fullName: fullName.trim(),
+      admissionNo: finalAdmissionNo,
       classId,
       gender,
-      dateOfBirth,
-      guardianName,
-      guardianPhone,
-      address,
+      dateOfBirth: new Date(dateOfBirth),
+      guardianName: guardianName.trim(),
+      guardianPhone: guardianPhone.trim(),
+      address: address.trim(),
       status: status || 'active',
       statusReason: statusReason || '',
-      photoUrl,
+      photoUrl: photoUrl && photoUrl.trim() ? photoUrl.trim() : undefined,
     });
     await student.save();
 
     const savedStudent = await Student.findById(student._id).populate('classId');
     res.status(201).json(savedStudent);
-  } catch (error) {
+  } catch (error: any) {
+    if (error.code === 11000 || error.name === 'MongoServerError') {
+      res.status(400).json({ error: 'Admission number already exists in this school. Please choose a different admission number.' });
+      return;
+    }
+    if (error.name === 'ValidationError') {
+      res.status(400).json({ error: error.message });
+      return;
+    }
     console.error('Create student error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Failed to create student: ' + (error.message || 'Internal server error') });
   }
 };
 
@@ -64,19 +103,26 @@ export const getStudents = async (req: AuthRequest, res: Response): Promise<void
     const { classId, status, activeOnly } = req.query;
     let filter = addSchoolFilter(req);
     
-    // If user is a teacher, filter by their assigned classes
+    // If user is a teacher, filter by their assigned classes or classes where they teach subjects
     if (req.user?.role === 'teacher') {
       const teacher = await User.findById(req.user.userId);
       const assigned = (teacher?.assignedClasses || []).map((id: any) => id.toString());
+      const subjectRegistrations = await SubjectRegistration.find({
+        schoolId: req.user.schoolId,
+        assignedTeacherId: req.user.userId,
+      }).distinct('classId');
+      const subjectClassIds = subjectRegistrations.map((id: any) => id.toString());
+      const allTeacherClassIds = Array.from(new Set([...assigned, ...subjectClassIds]));
+
       if (classId) {
-        if (!assigned.includes(classId.toString())) {
-          // Teacher is requesting a class they are not assigned to
+        if (!allTeacherClassIds.includes(classId.toString())) {
+          // Teacher is requesting a class they are not assigned or authorized to
           res.json([]);
           return;
         }
         filter.classId = classId;
       } else {
-        filter.classId = { $in: teacher?.assignedClasses || [] };
+        filter.classId = { $in: allTeacherClassIds };
       }
     } else if (classId) {
       filter.classId = classId;
@@ -170,9 +216,13 @@ export const updateStudent = async (req: AuthRequest, res: Response): Promise<vo
     }
 
     res.json(student);
-  } catch (error) {
+  } catch (error: any) {
+    if (error.code === 11000 || error.name === 'MongoServerError') {
+      res.status(400).json({ error: 'Admission number already exists in this school' });
+      return;
+    }
     console.error('Update student error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Internal server error: ' + (error.message || '') });
   }
 };
 

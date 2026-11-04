@@ -129,10 +129,30 @@ export const getStudentSubjects = async (req: AuthRequest, res: Response): Promi
       $or: orConditions,
     });
 
-    const registrations = await SubjectRegistration.find(filter)
+    let registrations = await SubjectRegistration.find(filter)
       .populate('subjectId')
       .populate('assignedTeacherId')
       .sort({ subjectId: 1 });
+
+    // Fallback: If no registrations for specific session, check class level
+    if (registrations.length === 0 && classId) {
+      registrations = await SubjectRegistration.find(addSchoolFilter(req, {
+        $or: [{ classId }, { studentId }],
+      }))
+        .populate('subjectId')
+        .populate('assignedTeacherId')
+        .sort({ subjectId: 1 });
+    }
+
+    // Secondary fallback: if no explicit registrations, load all active subjects for the school
+    if (registrations.length === 0) {
+      const allSubjects = await Subject.find(addSchoolFilter(req)).sort({ name: 1 });
+      registrations = allSubjects.map((s) => ({
+        _id: s._id,
+        subjectId: s,
+        assignedTeacherId: null,
+      })) as any;
+    }
 
     res.json(registrations);
   } catch (error) {

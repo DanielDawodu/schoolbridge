@@ -37,7 +37,7 @@ interface Student {
   _id: string;
   fullName: string;
   admissionNo: string;
-  classId: string;
+  classId: any;
   photo?: string;
   status?: string;
 }
@@ -183,9 +183,20 @@ const HalfTermReport: React.FC = () => {
     try {
       setLoading(true);
       const res = await api.get('/students', { params: { classId: cls._id } });
-      const activeOnly = (res.data || []).filter(
-        (s: Student) => s.classId?.toString() === cls._id.toString() && (s.status === 'active' || !s.status)
-      );
+      const getStudentClassId = (s: any): string => {
+        if (!s || !s.classId) return '';
+        if (typeof s.classId === 'object') {
+          return s.classId._id ? s.classId._id.toString() : '';
+        }
+        return s.classId.toString();
+      };
+
+      const activeOnly = (res.data || []).filter((s: any) => {
+        const sClassId = getStudentClassId(s);
+        const matchesClass = !cls._id || sClassId === cls._id.toString();
+        const isActive = s.status === 'active' || !s.status;
+        return matchesClass && isActive;
+      });
       setStudents(activeOnly);
     } catch (err) {
       console.error('Failed to fetch students:', err);
