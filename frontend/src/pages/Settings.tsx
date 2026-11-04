@@ -10,6 +10,13 @@ interface AcademicSession {
   finalTerm?: string;
 }
 
+export interface AssessmentConfig {
+  examMax: number;
+  midtermMax: number;
+  ca1Max?: number;
+  ca2Max?: number;
+}
+
 interface School {
   _id: string;
   name: string;
@@ -17,6 +24,7 @@ interface School {
   signatureUrl?: string;
   reportCardMode?: 'mid-term-and-term' | 'term-only';
   activePeriodId?: string;
+  assessmentConfig?: AssessmentConfig;
 }
 
 interface ClassLevel {
@@ -93,6 +101,13 @@ const Settings: React.FC = () => {
 
   // Signature
   const [showSignatureModal, setShowSignatureModal] = useState(false);
+  const [assessmentConfig, setAssessmentConfig] = useState<AssessmentConfig>({
+    examMax: 60,
+    midtermMax: 40,
+    ca1Max: 20,
+    ca2Max: 20,
+  });
+  const [savingAssessmentConfig, setSavingAssessmentConfig] = useState(false);
   const [signatureFile, setSignatureFile] = useState<File | null>(null);
 
   useEffect(() => {
@@ -112,6 +127,14 @@ const Settings: React.FC = () => {
           api.get('/periods').catch(() => ({ data: [] })),
         ]);
       setSchool(schoolRes.data);
+      if (schoolRes.data?.assessmentConfig) {
+        setAssessmentConfig({
+          examMax: schoolRes.data.assessmentConfig.examMax ?? 60,
+          midtermMax: schoolRes.data.assessmentConfig.midtermMax ?? 40,
+          ca1Max: schoolRes.data.assessmentConfig.ca1Max ?? 20,
+          ca2Max: schoolRes.data.assessmentConfig.ca2Max ?? 20,
+        });
+      }
       setSessions(sessionsRes.data || []);
       setClassLevels(classLevelsRes.data || []);
       setSessionsMaster(sessionsMasterRes.data || []);
@@ -314,8 +337,30 @@ const Settings: React.FC = () => {
       setSignatureFile(null);
       const schoolRes = await api.get('/schools/me');
       setSchool(schoolRes.data);
+      if (schoolRes.data?.assessmentConfig) {
+        setAssessmentConfig({
+          examMax: schoolRes.data.assessmentConfig.examMax ?? 60,
+          midtermMax: schoolRes.data.assessmentConfig.midtermMax ?? 40,
+          ca1Max: schoolRes.data.assessmentConfig.ca1Max ?? 20,
+          ca2Max: schoolRes.data.assessmentConfig.ca2Max ?? 20,
+        });
+      }
     } catch (error: any) {
       alert(error.response?.data?.error || 'Failed to upload signature');
+    }
+  };
+
+  const handleSaveAssessmentConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setSavingAssessmentConfig(true);
+      const res = await api.put('/schools/me', { assessmentConfig });
+      setSchool(res.data);
+      alert('Assessment maximum scores configuration saved successfully!');
+    } catch (error: any) {
+      alert(error.response?.data?.error || 'Failed to save assessment configuration');
+    } finally {
+      setSavingAssessmentConfig(false);
     }
   };
 
@@ -336,6 +381,8 @@ const Settings: React.FC = () => {
       </div>
     );
   }
+
+
 
   return (
     <div>
@@ -842,6 +889,100 @@ const Settings: React.FC = () => {
                     <span className="block text-xs text-gray-500">Generate only full term report cards</span>
                   </div>
                 </label>
+              </div>
+
+              {/* Assessment Maximum Scores Configuration */}
+              <div className="pt-6 border-t max-w-lg mb-8">
+                <h3 className="text-md font-semibold text-gray-900 mb-1">Assessment Maximum Marks Configuration</h3>
+                <p className="text-xs text-gray-500 mb-4">
+                  Configure maximum marks for exams and mid-term assessments. Result entry will automatically enforce these limits.
+                </p>
+                <form onSubmit={handleSaveAssessmentConfig} className="space-y-4 bg-gray-50 p-4 border border-gray-200 rounded-lg">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-700 mb-1">Examination Max</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="100"
+                        value={assessmentConfig.examMax}
+                        onChange={(e) => setAssessmentConfig({ ...assessmentConfig, examMax: parseInt(e.target.value) || 0 })}
+                        className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm"
+                        required
+                      />
+                      <span className="text-[11px] text-gray-500">e.g. 60, 70, or 80</span>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-700 mb-1">Mid-Term Total Max</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="100"
+                        value={assessmentConfig.midtermMax}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value) || 0;
+                          setAssessmentConfig({
+                            ...assessmentConfig,
+                            midtermMax: val,
+                            ca1Max: Math.round(val / 2),
+                            ca2Max: val - Math.round(val / 2),
+                          });
+                        }}
+                        className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm"
+                        required
+                      />
+                      <span className="text-[11px] text-gray-500">e.g. 40, 30, or 20</span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-700 mb-1">CA 1 Max</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max={assessmentConfig.midtermMax}
+                        value={assessmentConfig.ca1Max}
+                        onChange={(e) => setAssessmentConfig({ ...assessmentConfig, ca1Max: parseInt(e.target.value) || 0 })}
+                        className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-700 mb-1">CA 2 Max</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max={assessmentConfig.midtermMax}
+                        value={assessmentConfig.ca2Max}
+                        onChange={(e) => setAssessmentConfig({ ...assessmentConfig, ca2Max: parseInt(e.target.value) || 0 })}
+                        className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs text-gray-600 bg-white p-2.5 rounded border border-gray-200">
+                    <div>
+                      <span>Term Total Marks: </span>
+                      <strong className="font-semibold text-indigo-700">
+                        {(assessmentConfig.ca1Max || 0) + (assessmentConfig.ca2Max || 0) + (assessmentConfig.examMax || 0)}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Mid-Term Marks: </span>
+                      <strong className="font-semibold text-indigo-700">{assessmentConfig.midtermMax}</strong>
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={savingAssessmentConfig}
+                    className="w-full bg-indigo-600 text-white px-4 py-2 rounded-md text-sm hover:bg-indigo-700 font-medium disabled:bg-gray-400"
+                  >
+                    {savingAssessmentConfig ? 'Saving...' : 'Save Assessment Configuration'}
+                  </button>
+                </form>
               </div>
 
               {/* Principal Signature Upload */}

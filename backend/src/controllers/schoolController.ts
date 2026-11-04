@@ -9,13 +9,41 @@ import { AuthRequest } from '../middleware/auth';
 
 export const getSchool = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const school = await School.findById(req.user?.schoolId);
+    let school = await School.findById(req.user?.schoolId).populate({
+      path: 'activePeriodId',
+      populate: [
+        { path: 'sessionId', select: 'year' },
+        { path: 'termId', select: 'name' }
+      ]
+    });
     if (!school) {
       res.status(404).json({ error: 'School not found' });
       return;
     }
 
-    res.json(school);
+    const schoolObj: any = school.toObject();
+    if (!schoolObj.activePeriodId) {
+      const activePeriod = await Period.findOne({
+        schoolId: req.user?.schoolId,
+        isActive: true,
+      }).populate('sessionId', 'year').populate('termId', 'name');
+
+      if (activePeriod) {
+        schoolObj.activePeriodId = activePeriod;
+        School.findByIdAndUpdate(req.user?.schoolId, { activePeriodId: activePeriod._id }).exec();
+      }
+    }
+
+    if (!schoolObj.assessmentConfig) {
+      schoolObj.assessmentConfig = {
+        examMax: 60,
+        midtermMax: 40,
+        ca1Max: 20,
+        ca2Max: 20
+      };
+    }
+
+    res.json(schoolObj);
   } catch (error) {
     console.error('Get school error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -132,7 +160,7 @@ export const updateSchoolSignature = async (req: AuthRequest, res: Response): Pr
 
 export const updateSchool = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { reportCardMode } = req.body;
+    const { reportCardMode, assessmentConfig } = req.body;
 
     const school = await School.findById(req.user?.schoolId);
     if (!school) {
@@ -142,6 +170,19 @@ export const updateSchool = async (req: AuthRequest, res: Response): Promise<voi
 
     if (reportCardMode) {
       school.reportCardMode = reportCardMode;
+    }
+
+    if (assessmentConfig) {
+      const examMax = Number(assessmentConfig.examMax) || 60;
+      const midtermMax = Number(assessmentConfig.midtermMax) || 40;
+      const ca1Max = assessmentConfig.ca1Max !== undefined ? Number(assessmentConfig.ca1Max) : Math.round(midtermMax / 2);
+      const ca2Max = assessmentConfig.ca2Max !== undefined ? Number(assessmentConfig.ca2Max) : (midtermMax - ca1Max);
+      school.assessmentConfig = {
+        examMax,
+        midtermMax,
+        ca1Max,
+        ca2Max,
+      };
     }
 
     await school.save();

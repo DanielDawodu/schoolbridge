@@ -378,7 +378,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         </header>
 
         {/* Page content */}
-        <main className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">{children}</main>
+        <main className="p-4 sm:p-6 lg:p-8 w-full">{children}</main>
       </div>
     </div>
   );

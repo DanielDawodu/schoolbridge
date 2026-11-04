@@ -1,3 +1,5 @@
+const currentUserIsAdmin = (req: AuthRequest) => req.user?.role === "admin";
+import School from '../models/School';
 import { Response } from 'express';
 import StudentResult from '../models/StudentResult';
 import Student from '../models/Student';
@@ -18,13 +20,35 @@ const GRADE_SCALE = [
   { min: 0, max: 39, grade: 'F' },
 ];
 
-const calculateGrade = (score: number): string => {
-  for (const { min, max, grade } of GRADE_SCALE) {
-    if (score >= min && score <= max) {
-      return grade;
+const calculateGrade = (score: number, schoolGradeScale?: any[]): string => {
+  const scale = schoolGradeScale && schoolGradeScale.length > 0 ? schoolGradeScale : GRADE_SCALE;
+  for (const item of scale) {
+    if (score >= item.min && score <= item.max) {
+      return item.grade;
     }
   }
   return 'F';
+};
+
+const getSchoolAssessmentConfig = async (schoolId: any) => {
+  const school = await School.findById(schoolId);
+  const config = school?.assessmentConfig || {
+    examMax: 60,
+    midtermMax: 40,
+    ca1Max: 20,
+    ca2Max: 20,
+  };
+  const examMax = Number(config.examMax) || 60;
+  const midtermMax = Number(config.midtermMax) || 40;
+  const ca1Max = config.ca1Max !== undefined ? Number(config.ca1Max) : Math.round(midtermMax / 2);
+  const ca2Max = config.ca2Max !== undefined ? Number(config.ca2Max) : (midtermMax - ca1Max);
+  return {
+    examMax,
+    midtermMax,
+    ca1Max,
+    ca2Max,
+    gradeScale: school?.gradeScale,
+  };
 };
 
 const resolvePeriodAndSession = async (targetId: string, schoolId?: any) => {
@@ -329,69 +353,103 @@ export const saveStudentResult = async (req: AuthRequest, res: Response): Promis
 
     const { period, session, daysOpen } = await resolvePeriodAndSession(targetId, req.user?.schoolId);
 
-    // If teacher, verify they are assigned to these subjects
+    // Fetch school assessment config and grade scale
+    const { examMax, midtermMax, ca1Max, ca2Max, gradeScale } = await getSchoolAssessmentConfig(req.user?.schoolId);
+
+    // If teacher, verify class and subject assignments
     if (req.user?.role === 'teacher') {
+      const isAssignedClass = (req.user.assignedClasses || []).some(
+        (c: any) => c.toString() === student.classId?.toString()
+      );
+      const teachesInClass = await SubjectRegistration.exists({
+        schoolId: req.user.schoolId,
+        classId: student.classId,
+        assignedTeacherId: req.user.userId,
+      });
+
+      if (!isAssignedClass && !teachesInClass) {
+        res.status(403).json({ error: "Access denied: You are not assigned to this student's class" });
+        return;
+      }
+
       const userRegistrations = await SubjectRegistration.find({
         schoolId: req.user?.schoolId,
         ...buildPeriodOrSessionFilter(targetId),
+        classId: student.classId,
         assignedTeacherId: req.user.userId,
       });
 
       const assignedSubjectIds = userRegistrations.map((r) => r.subjectId.toString());
-      const requestedSubjectIds = (subjectScores || []).map((s: any) => s.subjectId);
+      const requestedSubjectIds = (subjectScores || []).map((s: any) => s.subjectId.toString());
 
       for (const subjectId of requestedSubjectIds) {
         if (!assignedSubjectIds.includes(subjectId)) {
-          res.status(403).json({ error: 'Teacher can only enter scores for assigned subjects' });
+          res.status(403).json({ error: 'Teacher can only enter or modify scores for assigned subjects' });
+          return;
+        }
+      }
+    }
+
+    // Strict validation of scores
+    for (const score of subjectScores || []) {
+      const sName = score.subjectName || 'Subject';
+      const ca1 = Number(score.ca1);
+      const ca2 = Number(score.ca2);
+      const exam = Number(score.exam);
+
+      if (isNaN(ca1) || ca1 < 0 || ca1 > ca1Max) {
+        res.status(400).json({ error: `CA1 score for ${sName} must be between 0 and ${ca1Max}` });
+        return;
+      }
+      if (isNaN(ca2) || ca2 < 0 || ca2 > ca2Max) {
+        res.status(400).json({ error: `CA2 score for ${sName} must be between 0 and ${ca2Max}` });
+        return;
+      }
+      if (performanceType === 'term') {
+        if (isNaN(exam) || exam < 0 || exam > examMax) {
+          res.status(400).json({ error: `Exam score for ${sName} must be between 0 and ${examMax}` });
           return;
         }
       }
     }
 
     // Calculate totals and grades for each subject
+    const totalMax = performanceType === 'mid-term' ? midtermMax : (ca1Max + ca2Max + examMax);
+
     const processedScores = await Promise.all(
       (subjectScores || []).map(async (score: any) => {
-        const subject = await Subject.findById(score.subjectId);
-        const ca1Weight = subject?.ca1Weight || 20;
-        const ca2Weight = subject?.ca2Weight || 20;
-        const examWeight = subject?.examWeight || 60;
+        const ca1 = Number(score.ca1) || 0;
+        const ca2 = Number(score.ca2) || 0;
+        const exam = performanceType === 'term' ? (Number(score.exam) || 0) : 0;
 
         let total = 0;
         if (performanceType === 'mid-term') {
-          const caTotalWeight = ca1Weight + ca2Weight;
-          if (caTotalWeight > 0) {
-            total = Math.round(
-              (((score.ca1 || 0) * ca1Weight) / 100 + ((score.ca2 || 0) * ca2Weight) / 100) /
-                (caTotalWeight / 100)
-            );
+          if (midtermMax > 0 && midtermMax !== 100) {
+            total = Math.round(((ca1 + ca2) / midtermMax) * 100);
           } else {
-            total = Math.round(((score.ca1 || 0) + (score.ca2 || 0)) / 2);
+            total = ca1 + ca2;
           }
         } else {
-          total = Math.round(
-            ((score.ca1 || 0) * ca1Weight) / 100 +
-              ((score.ca2 || 0) * ca2Weight) / 100 +
-              ((score.exam || 0) * examWeight) / 100
-          );
+          if (totalMax > 0 && totalMax !== 100) {
+            total = Math.round(((ca1 + ca2 + exam) / totalMax) * 100);
+          } else {
+            total = ca1 + ca2 + exam;
+          }
         }
-        const grade = calculateGrade(total);
+
+        const grade = calculateGrade(total, gradeScale);
 
         return {
           ...score,
+          ca1,
+          ca2,
+          exam,
           total: Math.round(total),
           grade,
           position: 0,
         };
       })
     );
-
-    const totalScore = processedScores.reduce((sum, s) => sum + s.total, 0);
-    const averageScore = processedScores.length > 0 ? totalScore / processedScores.length : 0;
-
-    const attendanceSummary =
-      performanceType === 'term' || !performanceType
-        ? await calculateAttendanceSummary(req.user?.schoolId, studentId, daysOpen)
-        : { daysOpen: 0, daysPresent: 0, daysAbsent: 0 };
 
     let result = await StudentResult.findOne({
       schoolId: req.user?.schoolId,
@@ -400,14 +458,34 @@ export const saveStudentResult = async (req: AuthRequest, res: Response): Promis
       performanceType: performanceType || 'term',
     });
 
+    // If teacher submitted, merge with existing scores so other teachers' entered scores are preserved
+    let finalScores = processedScores;
+    if (result && req.user?.role === 'teacher') {
+      const submittedIds = new Set(processedScores.map((s: any) => s.subjectId.toString()));
+      const otherScores = (result.subjectScores || []).filter(
+        (s: any) => !submittedIds.has(s.subjectId.toString())
+      );
+      finalScores = [...otherScores, ...processedScores];
+    }
+
+    const totalScore = finalScores.reduce((sum, s) => sum + s.total, 0);
+    const averageScore = finalScores.length > 0 ? totalScore / finalScores.length : 0;
+
+    const attendanceSummary =
+      performanceType === 'term' || !performanceType
+        ? await calculateAttendanceSummary(req.user?.schoolId, studentId, daysOpen)
+        : { daysOpen: 0, daysPresent: 0, daysAbsent: 0 };
+
     if (result) {
-      result.subjectScores = processedScores;
+      result.subjectScores = finalScores;
       if (performanceType === 'term' || !performanceType) {
-        result.psychomotorSkills = psychomotorSkills || [];
-        result.affectiveDomain = affectiveDomain || [];
+        if (psychomotorSkills) result.psychomotorSkills = psychomotorSkills;
+        if (affectiveDomain) result.affectiveDomain = affectiveDomain;
       }
-      result.teacherComment = teacherComment || '';
-      if (headOfSchoolComment !== undefined) {
+      if (teacherComment !== undefined) {
+        result.teacherComment = teacherComment;
+      }
+      if (currentUserIsAdmin(req) && headOfSchoolComment !== undefined) {
         result.headOfSchoolComment = headOfSchoolComment;
       }
       result.totalScore = Math.round(totalScore);
@@ -424,11 +502,11 @@ export const saveStudentResult = async (req: AuthRequest, res: Response): Promis
         studentId,
         classId: student.classId,
         performanceType: performanceType || 'term',
-        subjectScores: processedScores,
+        subjectScores: finalScores,
         psychomotorSkills: performanceType === 'term' || !performanceType ? psychomotorSkills || [] : [],
         affectiveDomain: performanceType === 'term' || !performanceType ? affectiveDomain || [] : [],
         teacherComment: teacherComment || '',
-        headOfSchoolComment: headOfSchoolComment || '',
+        headOfSchoolComment: currentUserIsAdmin(req) ? headOfSchoolComment || '' : '',
         totalScore: Math.round(totalScore),
         averageScore: Math.round(averageScore),
         attendanceSummary,

@@ -1,3 +1,4 @@
+import SubjectRegistration from '../models/SubjectRegistration';
 import { Response } from 'express';
 import { AuthRequest } from './auth';
 import { StaffRole } from '../models/User';
@@ -23,7 +24,13 @@ export const requireClassAccess = async (req: AuthRequest, res: Response, next: 
     }
 
     const teacher = await User.findById(req.user.userId);
-    if (!teacher || !teacher.assignedClasses.includes(classId as any)) {
+    const assigned = (teacher?.assignedClasses || []).map((id: any) => id.toString());
+    const isSubjectTeacher = await SubjectRegistration.exists({
+      schoolId: req.user?.schoolId,
+      classId,
+      assignedTeacherId: req.user?.userId,
+    });
+    if (!assigned.includes(classId.toString()) && !isSubjectTeacher) {
       res.status(403).json({ error: 'Access denied: You are not assigned to this class' });
       return;
     }

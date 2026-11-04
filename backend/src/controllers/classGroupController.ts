@@ -1,3 +1,6 @@
+import Student from '../models/Student';
+import SubjectRegistration from '../models/SubjectRegistration';
+import mongoose from 'mongoose';
 import { Response } from 'express';
 import ClassGroup from '../models/ClassGroup';
 import ClassLevel from '../models/ClassLevel';
@@ -39,15 +42,17 @@ export const getClasses = async (req: AuthRequest, res: Response): Promise<void>
     const { periodId } = req.query;
     let filter = addSchoolFilter(req);
 
-    // If user is a teacher, filter by their assigned classes
+    // If user is a teacher, filter by their assigned classes or classes where they teach subjects
     if (req.user?.role === 'teacher') {
       const teacher = await User.findById(req.user.userId);
-      if (teacher && teacher.assignedClasses.length > 0) {
-        filter._id = { $in: teacher.assignedClasses };
-      } else {
-        // Teacher with no assigned classes sees no classes
-        filter._id = { $in: [] };
-      }
+      const assignedClassIds = (teacher?.assignedClasses || []).map((c: any) => c.toString());
+      const subjectRegistrations = await SubjectRegistration.find({
+        schoolId: req.user.schoolId,
+        assignedTeacherId: req.user.userId,
+      }).distinct('classId');
+      const subjectClassIds = subjectRegistrations.map((id: any) => id.toString());
+      const allTeacherClassIds = Array.from(new Set([...assignedClassIds, ...subjectClassIds]));
+      filter._id = { $in: allTeacherClassIds };
     }
 
     if (periodId) {
@@ -60,7 +65,55 @@ export const getClasses = async (req: AuthRequest, res: Response): Promise<void>
       .populate('periodId')
       .sort({ classLevelId: 1, arm: 1 });
 
-    res.json(classes);
+    const classIds = classes.map(c => c._id);
+
+    // Find teachers with assignedClasses
+    const teachers = await User.find({
+      schoolId: req.user?.schoolId,
+      role: 'teacher',
+      assignedClasses: { $in: classIds },
+    }).select('name fullName assignedClasses');
+
+    // Also find teachers from SubjectRegistration
+    const subjectRegs = await SubjectRegistration.find({
+      schoolId: req.user?.schoolId,
+      classId: { $in: classIds },
+      assignedTeacherId: { $exists: true, $ne: null },
+    }).populate('assignedTeacherId', 'name fullName');
+
+    // Count active students per class
+    const studentCounts = await Student.aggregate([
+      { $match: { schoolId: new mongoose.Types.ObjectId(req.user?.schoolId), classId: { $in: classIds }, status: { $ne: 'inactive' } } },
+      { $group: { _id: '$classId', count: { $sum: 1 } } },
+    ]);
+
+    const studentCountMap = new Map<string, number>();
+    studentCounts.forEach((sc: any) => studentCountMap.set(sc._id.toString(), sc.count));
+
+    const enhancedClasses = classes.map(c => {
+      const cId = c._id.toString();
+      const classTeachers = new Set<string>();
+
+      teachers.forEach((t: any) => {
+        if ((t.assignedClasses || []).some((ac: any) => ac.toString() === cId)) {
+          classTeachers.add(t.fullName || t.name);
+        }
+      });
+
+      subjectRegs.forEach((sr: any) => {
+        if (sr.classId?.toString() === cId && sr.assignedTeacherId) {
+          const tName = sr.assignedTeacherId.fullName || sr.assignedTeacherId.name;
+          if (tName) classTeachers.add(tName);
+        }
+      });
+
+      const obj: any = c.toObject();
+      obj.assignedTeachers = Array.from(classTeachers);
+      obj.studentCount = studentCountMap.get(cId) || 0;
+      return obj;
+    });
+
+    res.json(enhancedClasses);
   } catch (error) {
     console.error('Get classes error:', error);
     res.status(500).json({ error: 'Internal server error' });

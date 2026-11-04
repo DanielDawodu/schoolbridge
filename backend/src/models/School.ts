@@ -7,6 +7,13 @@ export interface IGradeScale {
   description: string;
 }
 
+export interface IAssessmentConfig {
+  examMax: number;
+  midtermMax: number;
+  ca1Max?: number;
+  ca2Max?: number;
+}
+
 export interface ISchool extends Document {
   name: string;
   address: string;
@@ -14,6 +21,7 @@ export interface ISchool extends Document {
   activeTermId?: mongoose.Types.ObjectId; // For migration compatibility
   signatureUrl?: string;
   reportCardMode: 'mid-term-and-term' | 'term-only';
+  assessmentConfig?: IAssessmentConfig;
   gradeScale: IGradeScale[];
   createdAt: Date;
 }
@@ -44,6 +52,12 @@ const SchoolSchema: Schema = new Schema({
     type: String,
     enum: ['mid-term-and-term', 'term-only'],
     default: 'mid-term-and-term',
+  },
+  assessmentConfig: {
+    examMax: { type: Number, default: 60 },
+    midtermMax: { type: Number, default: 40 },
+    ca1Max: { type: Number, default: 20 },
+    ca2Max: { type: Number, default: 20 },
   },
   gradeScale: [{
     min: {
