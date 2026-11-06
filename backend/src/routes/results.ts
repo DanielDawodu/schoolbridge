@@ -4,6 +4,9 @@ import { requireAdmin } from '../middleware/permissions';
 import {
   createOrUpdateResult,
   saveStudentResult,
+  completeStudentResult,
+  reopenStudentResult,
+  getClassLeaderboard,
   getStudentResult,
   getStudentTermResults,
   getStudentAllResults,
@@ -18,11 +21,20 @@ const router = express.Router();
 // All routes require authentication
 router.use(authenticate);
 
-// Create or update result (teacher for their assigned students, admin for all)
+// Create or update result (legacy/standard endpoint)
 router.post('/', createOrUpdateResult);
 
-// Save student result (new unified endpoint for the restructured UI)
+// Save student result (draft / incremental save)
 router.post('/save', saveStudentResult);
+
+// Phase 1: Complete student result with teacher validation & accountability
+router.post('/complete', completeStudentResult);
+
+// Reopen a completed result for corrections (Admin only)
+router.post('/reopen', requireAdmin, reopenStudentResult);
+
+// Phase 2: Class leaderboard (Teacher restricted to assigned classes, Admin unrestricted)
+router.get('/leaderboard', getClassLeaderboard);
 
 // Get student result
 router.get('/student', getStudentResult);
@@ -39,7 +51,7 @@ router.get('/student/terms', getStudentTermResults);
 // Get class results (admin only)
 router.get('/class', requireAdmin, getClassResults);
 
-// Update head of school comment (admin only)
+// Update head of school comment and approve report (admin only)
 router.put('/head-comment', requireAdmin, updateHeadOfSchoolComment);
 
 // Release results (admin only)

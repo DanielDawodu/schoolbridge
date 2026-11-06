@@ -12,7 +12,11 @@ import {
   ChevronRight,
   ShieldAlert,
   Lock,
-  UserCheck
+
+  AlertCircle,
+  RefreshCw,
+  Trophy,
+  X,
 } from 'lucide-react';
 
 interface Subject {
@@ -98,70 +102,78 @@ const AFFECTIVE_TRAITS = [
   'Attentiveness in Class',
 ];
 
-const GRADE_SCALE = [
-  { min: 70, max: 100, grade: 'A' },
-  { min: 60, max: 69, grade: 'B' },
-  { min: 50, max: 59, grade: 'C' },
-  { min: 40, max: 49, grade: 'D' },
-  { min: 0, max: 39, grade: 'F' },
-];
-
-const calculateGrade = (score: number): string => {
-  for (const { min, max, grade } of GRADE_SCALE) {
-    if (score >= min && score <= max) {
-      return grade;
-    }
-  }
-  return 'F';
-};
-
 const ResultEntry: React.FC = () => {
-  // Navigation step: 'classes' -> 'students' -> 'entry'
+  // Navigation / Workflow steps
   const [currentStep, setCurrentStep] = useState<'classes' | 'students' | 'entry'>('classes');
 
-  // School & Active Period Context
-  const [currentUser, setCurrentUser] = useState<any>(null);
+  // Selected Entities
+  const [selectedClass, setSelectedClass] = useState<ClassGroup | null>(null);
+  const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
+
+  // Data states
+  const [classes, setClasses] = useState<ClassGroup[]>([]);
+  const [students, setStudents] = useState<Student[]>([]);
+  const [subjectRegistrations, setSubjectRegistrations] = useState<SubjectRegistration[]>([]);
+  const [subjectScores, setSubjectScores] = useState<Record<string, SubjectScore>>({});
+
+  // Active configuration (strictly centralized from Settings)
+  const [activeSession, setActiveSession] = useState<any>(null);
   const [activePeriod, setActivePeriod] = useState<any>(null);
-  const [activeSessionYear, setActiveSessionYear] = useState<string>('');
-  const [activeTermName, setActiveTermName] = useState<string>('');
+  const [hasActiveTerm, setHasActiveTerm] = useState<boolean>(true);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+
+  // Assessment config
   const [assessmentConfig, setAssessmentConfig] = useState<AssessmentConfig>({
     examMax: 60,
     midtermMax: 40,
     ca1Max: 20,
     ca2Max: 20,
   });
-  const [hasActiveTerm, setHasActiveTerm] = useState<boolean>(true);
+  const [schoolGradeScale, setSchoolGradeScale] = useState<any[]>([]);
 
-  // Class Selection state
-  const [classes, setClasses] = useState<ClassGroup[]>([]);
-  const [classSearch, setClassSearch] = useState('');
-  const [selectedClass, setSelectedClass] = useState<ClassGroup | null>(null);
-
-  // Student Selection state
-  const [students, setStudents] = useState<Student[]>([]);
-  const [studentSearch, setStudentSearch] = useState('');
-  const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
-  const [completionMap, setCompletionMap] = useState<Record<string, any>>({});
-  const [studentFilter, setStudentFilter] = useState<'all' | 'completed' | 'pending'>('all');
-
-  // Result Entry state
-  const [performanceType, setPerformanceType] = useState<'mid-term' | 'term'>('term');
-  const [subjectRegistrations, setSubjectRegistrations] = useState<SubjectRegistration[]>([]);
-  const [subjectScores, setSubjectScores] = useState<Record<string, SubjectScore>>({});
-  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
+  // Assessment domains & comments
   const [psychomotorSkills, setPsychomotorSkills] = useState<PsychomotorRating[]>([]);
   const [affectiveDomain, setAffectiveDomain] = useState<AffectiveRating[]>([]);
-  const [teacherComment, setTeacherComment] = useState('');
-  const [headOfSchoolComment, setHeadOfSchoolComment] = useState('');
+  const [teacherComment, setTeacherComment] = useState<string>('');
+  const [headOfSchoolComment, setHeadOfSchoolComment] = useState<string>('');
+  const [performanceType, setPerformanceType] = useState<'term' | 'mid-term'>('term');
   const [verificationCode, setVerificationCode] = useState<string>('');
 
-  // Loading & notification states
+  // Phase 1 Completion & Ranking States
+  const [isCompleted, setIsCompleted] = useState<boolean>(false);
+  const [completedBy, setCompletedBy] = useState<any>(null);
+  const [completedAt, setCompletedAt] = useState<string | null>(null);
+  const [isApproved, setIsApproved] = useState<boolean>(false);
+  const [classPosition, setClassPosition] = useState<number | null>(null);
+  const [classAverage, setClassAverage] = useState<number | null>(null);
+  const [studentPercentage, setStudentPercentage] = useState<number | null>(null);
+  const [totalMarksObtained, setTotalMarksObtained] = useState<number | null>(null);
+  const [totalAvailableMarks, setTotalAvailableMarks] = useState<number | null>(null);
+
+  // Leaderboard modal state
+  const [showLeaderboardModal, setShowLeaderboardModal] = useState<boolean>(false);
+  const [leaderboardData, setLeaderboardData] = useState<any>(null);
+  const [loadingLeaderboard, setLoadingLeaderboard] = useState<boolean>(false);
+
+  // Completion tracker map: studentId -> { isComplete, enteredCount, expectedCount, averageScore, verificationCode, percentage, classPosition }
+  const [completionMap, setCompletionMap] = useState<Record<string, any>>({});
+  const [classProgressMap, setClassProgressMap] = useState<Record<string, { completed: number; total: number }>>({});
+
+  // UI / UX state
   const [loading, setLoading] = useState<boolean>(true);
   const [saving, setSaving] = useState<boolean>(false);
+  const [completing, setCompleting] = useState<boolean>(false);
+  const [reopening, setReopening] = useState<boolean>(false);
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Initial load: current user, active period from Settings/School, and classes
+  // Search & Filter states
+  const [classSearch, setClassSearch] = useState<string>('');
+  const [studentSearch, setStudentSearch] = useState<string>('');
+  const [studentFilter, setStudentFilter] = useState<'all' | 'completed' | 'pending'>('all');
+
+  // Load user profile, active settings & class lists on mount
   useEffect(() => {
     initPage();
   }, []);
@@ -173,129 +185,177 @@ const ResultEntry: React.FC = () => {
 
       // Fetch user profile
       const userRes = await api.get('/auth/me');
-      setCurrentUser(userRes.data);
+      setCurrentUser(userRes.data?.user || userRes.data);
 
-      // Fetch school info for active period and assessmentConfig
-      const schoolRes = await api.get('/schools/me');
-      const school = schoolRes.data;
+      // Fetch school assessment config & active period
+      const schoolRes = await api.get('/schools/active-period');
+      const schoolData = schoolRes.data;
 
-      if (school.assessmentConfig) {
-        setAssessmentConfig({
-          examMax: school.assessmentConfig.examMax ?? 60,
-          midtermMax: school.assessmentConfig.midtermMax ?? 40,
-          ca1Max: school.assessmentConfig.ca1Max ?? 20,
-          ca2Max: school.assessmentConfig.ca2Max ?? 20,
-        });
+      if (!schoolData || !schoolData.hasActivePeriod) {
+        setHasActiveTerm(false);
+        setLoading(false);
+        return;
       }
 
-      if (school.activePeriodId) {
-        setActivePeriod(school.activePeriodId);
-        const periodObj = school.activePeriodId;
-        const year = typeof periodObj.sessionId === 'object' ? periodObj.sessionId.year : '';
-        const term = typeof periodObj.termId === 'object' ? periodObj.termId.name : '';
-        setActiveSessionYear(year);
-        setActiveTermName(term);
-        setHasActiveTerm(true);
-      } else {
-        // Fallback: check /periods to see if an active one exists
-        try {
-          const periodsRes = await api.get('/periods');
-          const activeP = (periodsRes.data || []).find((p: any) => p.isActive);
-          if (activeP) {
-            setActivePeriod(activeP);
-            const year = typeof activeP.sessionId === 'object' ? activeP.sessionId.year : '';
-            const term = typeof activeP.termId === 'object' ? activeP.termId.name : '';
-            setActiveSessionYear(year);
-            setActiveTermName(term);
-            setHasActiveTerm(true);
-          } else {
-            setHasActiveTerm(false);
-          }
-        } catch {
-          setHasActiveTerm(false);
-        }
+      setHasActiveTerm(true);
+      setActiveSession(schoolData.session);
+      setActivePeriod(schoolData.period);
+
+      if (schoolData.school?.assessmentConfig) {
+        const cfg = schoolData.school.assessmentConfig;
+        const examMax = Number(cfg.examMax) || 60;
+        const midtermMax = Number(cfg.midtermMax) || 40;
+        const ca1Max = cfg.ca1Max !== undefined ? Number(cfg.ca1Max) : Math.round(midtermMax / 2);
+        const ca2Max = cfg.ca2Max !== undefined ? Number(cfg.ca2Max) : midtermMax - ca1Max;
+        setAssessmentConfig({ examMax, midtermMax, ca1Max, ca2Max });
       }
 
-      // Fetch classes available to this user (backend handles role-based filtering)
+      if (schoolData.school?.gradeScale) {
+        setSchoolGradeScale(schoolData.school.gradeScale);
+      }
+
+      // Fetch classes available to user
       const classesRes = await api.get('/classes');
       setClasses(classesRes.data || []);
+
+      // Preload class student count & progress
+      const targetPeriodId = schoolData.period?._id || schoolData.session?._id;
+      if (targetPeriodId && classesRes.data?.length > 0) {
+        loadClassProgressData(classesRes.data, targetPeriodId);
+      }
     } catch (err: any) {
-      console.error('Initialization error:', err);
-      setErrorMessage('Failed to initialize page data.');
+      console.error('Failed to initialize Result Entry:', err);
+      setErrorMessage(err.response?.data?.error || 'Failed to initialize Result Entry workflow.');
     } finally {
       setLoading(false);
     }
   };
 
-  // When a class is selected, fetch students and completion info
+  // Helper to load progress statistics across classes
+  const loadClassProgressData = async (classList: ClassGroup[], targetId: string) => {
+    const progress: Record<string, { completed: number; total: number }> = {};
+    for (const cls of classList) {
+      try {
+        const trackerRes = await api.get('/results/completion', {
+          params: { sessionId: targetId, classId: cls._id, performanceType: 'term' },
+        });
+        progress[cls._id] = {
+          completed: trackerRes.data.completedCount || 0,
+          total: trackerRes.data.totalStudents || 0,
+        };
+      } catch {
+        progress[cls._id] = { completed: 0, total: 0 };
+      }
+    }
+    setClassProgressMap(progress);
+  };
+
+  // Calculate grade based on score
+  const calculateGrade = (total: number): string => {
+    const scale = schoolGradeScale.length > 0
+      ? schoolGradeScale
+      : [
+          { min: 70, max: 100, grade: 'A' },
+          { min: 60, max: 69, grade: 'B' },
+          { min: 50, max: 59, grade: 'C' },
+          { min: 40, max: 49, grade: 'D' },
+          { min: 0, max: 39, grade: 'F' },
+        ];
+
+    for (const item of scale) {
+      if (total >= item.min && total <= item.max) {
+        return item.grade;
+      }
+    }
+    return 'F';
+  };
+
+  // Handle Class Click -> Step 2
   const handleSelectClass = async (cls: ClassGroup) => {
     setSelectedClass(cls);
     setCurrentStep('students');
     setStudentSearch('');
+    setStudentFilter('all');
+
+    const targetPeriodId = activePeriod?._id || activeSession?._id;
+    await Promise.all([
+      loadStudentsForClass(cls._id),
+      loadCompletionTracker(cls._id, targetPeriodId),
+    ]);
+  };
+
+  const getStudentClassId = (student: any): string => {
+    if (!student || !student.classId) return '';
+    if (typeof student.classId === 'string') return student.classId;
+    if (student.classId._id) return student.classId._id.toString();
+    return student.classId.toString();
+  };
+
+  // Load students for selected class
+  const loadStudentsForClass = async (classId: string) => {
     try {
       setLoading(true);
-      const [studentsRes, completionRes] = await Promise.all([
-        api.get('/students', { params: { classId: cls._id } }),
-        api.get('/results/completion', {
-          params: {
-            classId: cls._id,
-            periodId: activePeriod?._id || (typeof activePeriod === 'string' ? activePeriod : undefined),
-            performanceType,
-          },
-        }).catch(() => ({ data: { students: [] } })),
-      ]);
-
-      const getStudentClassId = (s: any): string => {
-        if (!s || !s.classId) return '';
-        if (typeof s.classId === 'object') {
-          return s.classId._id ? s.classId._id.toString() : '';
-        }
-        return s.classId.toString();
-      };
-
-      const classStudents = (studentsRes.data || []).filter((s: any) => {
-        const sClassId = getStudentClassId(s);
-        const matchesClass = !cls._id || sClassId === cls._id.toString();
-        const isActive = s.status === 'active' || !s.status;
-        return matchesClass && isActive;
+      const res = await api.get('/students');
+      const allStudents: Student[] = res.data || [];
+      const classStudents = allStudents.filter((s) => {
+        const rawClassId = getStudentClassId(s);
+        return rawClassId === classId.toString();
       });
       setStudents(classStudents);
-
-      const cMap: Record<string, any> = {};
-      (completionRes.data?.students || []).forEach((item: any) => {
-        cMap[item.studentId] = item;
-      });
-      setCompletionMap(cMap);
     } catch (err) {
-      console.error('Failed to load students:', err);
+      console.error('Failed to load students for class:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  // When a student is selected, load subject registrations and existing result
+  // Load completion tracker for selected class
+  const loadCompletionTracker = async (classId: string, targetId: string) => {
+    try {
+      const res = await api.get('/results/completion', {
+        params: {
+          sessionId: targetId,
+          classId,
+          performanceType,
+        },
+      });
+
+      const map: Record<string, any> = {};
+      (res.data?.students || []).forEach((item: any) => {
+        map[item.studentId] = item;
+      });
+      setCompletionMap(map);
+    } catch (err) {
+      console.error('Failed to load completion tracker:', err);
+    }
+  };
+
+  // Handle Student Click -> Step 3
   const handleSelectStudent = async (student: Student) => {
     setSelectedStudent(student);
     setCurrentStep('entry');
-    setSaveSuccess(null);
     setValidationErrors({});
+    setSaveSuccess(null);
+    setErrorMessage(null);
     await loadStudentData(student._id);
   };
 
+  // Load subjects and scores for selected student
   const loadStudentData = async (studentId: string) => {
     if (!selectedClass) return;
+
     try {
       setLoading(true);
-      const targetPeriodId = activePeriod?._id || (typeof activePeriod === 'string' ? activePeriod : undefined);
+      const targetPeriodId = activePeriod?._id || activeSession?._id;
 
       // Fetch registered subjects for this class
       const regRes = await api.get('/subject-registrations/student-subjects', {
         params: {
-          sessionId: targetPeriodId,
-          studentId: studentId,
           classId: selectedClass._id,
+          sessionId: targetPeriodId,
         },
       });
+
       const registrations: SubjectRegistration[] = regRes.data || [];
       setSubjectRegistrations(registrations);
 
@@ -313,12 +373,21 @@ const ResultEntry: React.FC = () => {
         };
       });
 
-      // Initialize psychomotor & affective domains with default neutral rating (3)
+      // Default psychomotor & affective domains with rating 3
       setPsychomotorSkills(PSYCHOMOTOR_TRAITS.map((trait) => ({ trait, rating: 3 })));
       setAffectiveDomain(AFFECTIVE_TRAITS.map((trait) => ({ trait, rating: 3 })));
       setTeacherComment('');
       setHeadOfSchoolComment('');
       setVerificationCode('');
+      setIsCompleted(false);
+      setCompletedBy(null);
+      setCompletedAt(null);
+      setIsApproved(false);
+      setClassPosition(null);
+      setClassAverage(null);
+      setStudentPercentage(null);
+      setTotalMarksObtained(null);
+      setTotalAvailableMarks(null);
 
       // Fetch existing result if available
       try {
@@ -340,9 +409,19 @@ const ResultEntry: React.FC = () => {
           setTeacherComment(existingData.teacherComment || '');
           setHeadOfSchoolComment(existingData.headOfSchoolComment || '');
           setVerificationCode(existingData.verificationCode || '');
+
+          setIsCompleted(Boolean(existingData.isCompleted));
+          setCompletedBy(existingData.completedBy || null);
+          setCompletedAt(existingData.completedAt || null);
+          setIsApproved(Boolean(existingData.isApproved));
+          setClassPosition(existingData.classPosition || null);
+          setClassAverage(existingData.classAverage || null);
+          setStudentPercentage(existingData.percentage || existingData.averageScore || null);
+          setTotalMarksObtained(existingData.totalScore || null);
+          setTotalAvailableMarks(existingData.totalAvailableMarks || null);
         }
       } catch {
-        // No existing result is fine
+        // No existing result yet
       }
 
       setSubjectScores(initialScores);
@@ -362,10 +441,14 @@ const ResultEntry: React.FC = () => {
 
   // Handle score input changes with real-time validation
   const handleScoreChange = (subjectId: string, field: 'ca1' | 'ca2' | 'exam', rawValue: string) => {
+    if (isCompleted && currentUser?.role !== 'admin') {
+      alert('This result has already been completed. An administrator must reopen it before changes can be made.');
+      return;
+    }
+
     const errorKey = `${subjectId}_${field}`;
     const newErrors = { ...validationErrors };
 
-    // Empty input handling: allow empty typing, but treat as 0 for calculation
     const numValue = rawValue === '' ? 0 : parseInt(rawValue, 10);
 
     const maxAllowed =
@@ -417,6 +500,7 @@ const ResultEntry: React.FC = () => {
 
   // Check if current user is authorized to edit a subject
   const canEditSubject = (reg: SubjectRegistration): boolean => {
+    if (isCompleted && currentUser?.role !== 'admin') return false;
     if (currentUser?.role === 'admin') return true;
     if (currentUser?.role === 'teacher') {
       const currentUserId = currentUser._id || currentUser.userId;
@@ -426,8 +510,68 @@ const ResultEntry: React.FC = () => {
     return false;
   };
 
-  // Save results
-  const handleSave = async () => {
+  // Phase 1: Real-time completion checklist validation
+  const completionValidation = useMemo(() => {
+    const missingSubjects: string[] = [];
+    subjectRegistrations.forEach((reg) => {
+      const score = subjectScores[reg.subjectId._id];
+      if (!score) {
+        missingSubjects.push(reg.subjectId.name);
+      } else {
+        if (score.ca1 === undefined || score.ca1 === null || isNaN(score.ca1)) {
+          missingSubjects.push(`${reg.subjectId.name} (CA1)`);
+        }
+        if (score.ca2 === undefined || score.ca2 === null || isNaN(score.ca2)) {
+          missingSubjects.push(`${reg.subjectId.name} (CA2)`);
+        }
+        if (performanceType === 'term') {
+          if (score.exam === undefined || score.exam === null || isNaN(score.exam)) {
+            missingSubjects.push(`${reg.subjectId.name} (Exam)`);
+          }
+        }
+      }
+    });
+
+    const isScoresComplete = subjectRegistrations.length > 0 && missingSubjects.length === 0;
+    const isAffectiveComplete =
+      performanceType === 'mid-term' ||
+      (affectiveDomain.length > 0 && affectiveDomain.every((a) => a.rating >= 1 && a.rating <= 5));
+    const isPsychomotorComplete =
+      performanceType === 'mid-term' ||
+      (psychomotorSkills.length > 0 && psychomotorSkills.every((p) => p.rating >= 1 && p.rating <= 5));
+    const isTeacherCommentComplete = Boolean(teacherComment && teacherComment.trim().length > 0);
+    const hasScoreErrors = Object.keys(validationErrors).length > 0;
+
+    const canComplete =
+      isScoresComplete &&
+      isAffectiveComplete &&
+      isPsychomotorComplete &&
+      isTeacherCommentComplete &&
+      !hasScoreErrors &&
+      !isCompleted;
+
+    return {
+      missingSubjects,
+      isScoresComplete,
+      isAffectiveComplete,
+      isPsychomotorComplete,
+      isTeacherCommentComplete,
+      hasScoreErrors,
+      canComplete,
+    };
+  }, [
+    subjectRegistrations,
+    subjectScores,
+    performanceType,
+    affectiveDomain,
+    psychomotorSkills,
+    teacherComment,
+    validationErrors,
+    isCompleted,
+  ]);
+
+  // Save draft results
+  const handleSaveDraft = async () => {
     if (Object.keys(validationErrors).length > 0) {
       alert('Please fix all invalid scores before saving.');
       return;
@@ -442,7 +586,6 @@ const ResultEntry: React.FC = () => {
 
       const targetPeriodId = activePeriod?._id || (typeof activePeriod === 'string' ? activePeriod : undefined);
 
-      // Only submit editable scores if teacher, or all if admin
       const scoresToSubmit = Object.values(subjectScores).filter((score) => {
         if (currentUser?.role === 'admin') return true;
         const reg = subjectRegistrations.find((r) => r.subjectId._id === score.subjectId);
@@ -465,13 +608,124 @@ const ResultEntry: React.FC = () => {
       if (res.data?.verificationCode) {
         setVerificationCode(res.data.verificationCode);
       }
-      setSaveSuccess('Result saved successfully!');
+      setSaveSuccess('Draft result saved successfully!');
       setTimeout(() => setSaveSuccess(null), 4000);
+
+      // Refresh completion tracker
+      loadCompletionTracker(selectedClass._id, targetPeriodId);
     } catch (err: any) {
-      console.error('Save result error:', err);
+      console.error('Save draft error:', err);
       setErrorMessage(err.response?.data?.error || 'Failed to save student result.');
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Phase 1: Complete Result Action
+  const handleCompleteResult = async () => {
+    if (!completionValidation.canComplete) {
+      alert('Please satisfy all completion requirements before completing the result.');
+      return;
+    }
+
+    if (!selectedStudent || !selectedClass) return;
+
+    try {
+      setCompleting(true);
+      setErrorMessage(null);
+      setSaveSuccess(null);
+
+      const targetPeriodId = activePeriod?._id || (typeof activePeriod === 'string' ? activePeriod : undefined);
+
+      const payload = {
+        sessionId: targetPeriodId,
+        studentId: selectedStudent._id,
+        classId: selectedClass._id,
+        performanceType,
+        subjectScores: Object.values(subjectScores),
+        psychomotorSkills: performanceType === 'term' ? psychomotorSkills : [],
+        affectiveDomain: performanceType === 'term' ? affectiveDomain : [],
+        teacherComment,
+      };
+
+      const res = await api.post('/results/complete', payload);
+
+      setIsCompleted(true);
+      setCompletedAt(res.data.result?.completedAt || new Date().toISOString());
+      setClassPosition(res.data.classPosition || res.data.result?.classPosition);
+      setClassAverage(res.data.classAverage || res.data.result?.classAverage);
+      setStudentPercentage(res.data.percentage || res.data.result?.percentage);
+      setTotalMarksObtained(res.data.result?.totalScore || null);
+      setTotalAvailableMarks(res.data.result?.totalAvailableMarks || null);
+      if (res.data.result?.verificationCode) {
+        setVerificationCode(res.data.result.verificationCode);
+      }
+
+      setSaveSuccess('Result officially COMPLETED! Class ranking and positions have been automatically computed.');
+
+      // Refresh tracker
+      loadCompletionTracker(selectedClass._id, targetPeriodId);
+    } catch (err: any) {
+      console.error('Complete result error:', err);
+      setErrorMessage(err.response?.data?.error || 'Failed to complete result.');
+    } finally {
+      setCompleting(false);
+    }
+  };
+
+  // Reopen result for editing (Admin only)
+  const handleReopenResult = async () => {
+    if (!selectedStudent || !selectedClass) return;
+    if (!window.confirm('Reopen this completed result for editing? Completion will be required again after making changes.')) {
+      return;
+    }
+
+    try {
+      setReopening(true);
+      setErrorMessage(null);
+      setSaveSuccess(null);
+
+      const targetPeriodId = activePeriod?._id || (typeof activePeriod === 'string' ? activePeriod : undefined);
+
+      await api.post('/results/reopen', {
+        studentId: selectedStudent._id,
+        sessionId: targetPeriodId,
+        performanceType,
+      });
+
+      setIsCompleted(false);
+      setClassPosition(null);
+      setSaveSuccess('Result reopened for editing. You can now modify scores and re-complete.');
+      loadCompletionTracker(selectedClass._id, targetPeriodId);
+    } catch (err: any) {
+      console.error('Reopen result error:', err);
+      setErrorMessage(err.response?.data?.error || 'Failed to reopen result.');
+    } finally {
+      setReopening(false);
+    }
+  };
+
+  // Open class leaderboard modal
+  const handleOpenLeaderboard = async () => {
+    if (!selectedClass) return;
+    try {
+      setShowLeaderboardModal(true);
+      setLoadingLeaderboard(true);
+      const targetPeriodId = activePeriod?._id || activeSession?._id;
+
+      const res = await api.get('/results/leaderboard', {
+        params: {
+          classId: selectedClass._id,
+          sessionId: targetPeriodId,
+          performanceType,
+        },
+      });
+      setLeaderboardData(res.data);
+    } catch (err: any) {
+      console.error('Failed to load leaderboard:', err);
+      alert(err.response?.data?.error || 'Failed to load class leaderboard.');
+    } finally {
+      setLoadingLeaderboard(false);
     }
   };
 
@@ -512,21 +766,21 @@ const ResultEntry: React.FC = () => {
             <div>
               <h2 className="text-lg font-bold text-amber-900">Active Academic Session & Term Required</h2>
               <p className="mt-2 text-sm text-amber-800 leading-relaxed">
-                Result Entry requires an active academic session and current term to be configured centrally by the school administrator.
+                Result Entry requires an active academic session and current term to be configured centrally in Settings.
                 Currently, no active term is configured for your school.
               </p>
               {currentUser?.role === 'admin' ? (
                 <div className="mt-4">
                   <a
                     href="/settings"
-                    className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-semibold rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700"
+                    className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-semibold rounded-md shadow-xs text-white bg-amber-600 hover:bg-amber-700"
                   >
-                    Go to Settings to Configure Active Term
+                    Go to Settings to Configure Active Term →
                   </a>
                 </div>
               ) : (
-                <p className="mt-3 text-xs text-amber-700 font-medium">
-                  Please notify your school administrator to configure the active session and term in Settings.
+                <p className="mt-3 text-xs text-amber-700 font-medium italic">
+                  Please contact the School Administrator to set the current term before entering results.
                 </p>
               )}
             </div>
@@ -538,76 +792,51 @@ const ResultEntry: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Top Header & Breadcrumbs */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-gray-200 pb-4">
+      {/* Page Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-gray-200 pb-4">
         <div>
-          <nav className="flex items-center space-x-2 text-xs text-gray-500 mb-1">
-            <button
-              onClick={() => {
-                setCurrentStep('classes');
-                setSelectedClass(null);
-                setSelectedStudent(null);
-              }}
-              className={`hover:text-indigo-600 font-medium ${currentStep === 'classes' ? 'text-indigo-600 font-bold' : ''}`}
-            >
-              Classes
-            </button>
-            {selectedClass && (
+          <h1 className="text-2xl font-bold text-gray-900">Result Entry</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            {currentStep === 'classes' && 'Select a class to manage and submit student academic results.'}
+            {currentStep === 'students' && selectedClass && (
               <>
-                <ChevronRight className="h-3 w-3 text-gray-400" />
-                <button
-                  onClick={() => {
-                    setCurrentStep('students');
-                    setSelectedStudent(null);
-                  }}
-                  className={`hover:text-indigo-600 font-medium ${currentStep === 'students' ? 'text-indigo-600 font-bold' : ''}`}
-                >
-                  {typeof selectedClass.classLevelId === 'object' ? selectedClass.classLevelId.name : selectedClass.name || 'Class'} - {selectedClass.arm}
-                </button>
+                Class:{' '}
+                <strong className="text-indigo-600">
+                  {typeof selectedClass.classLevelId === 'object' ? selectedClass.classLevelId.name : selectedClass.name} - {selectedClass.arm}
+                </strong>
+                {' '}• Select a student to enter scores
               </>
             )}
-            {selectedStudent && (
+            {currentStep === 'entry' && selectedStudent && (
               <>
-                <ChevronRight className="h-3 w-3 text-gray-400" />
-                <span className="text-gray-900 font-bold">{selectedStudent.fullName}</span>
+                Entering results for <strong className="text-indigo-600">{selectedStudent.fullName}</strong> ({selectedStudent.admissionNo})
               </>
             )}
-          </nav>
-          <h1 className="text-2xl font-bold text-gray-900">
-            {currentStep === 'classes' && 'Result Entry — Select Class'}
-            {currentStep === 'students' && `Students — ${typeof selectedClass?.classLevelId === 'object' ? selectedClass?.classLevelId.name : selectedClass?.name} ${selectedClass?.arm}`}
-            {currentStep === 'entry' && `Score Entry — ${selectedStudent?.fullName}`}
-          </h1>
+          </p>
         </div>
 
-        {/* Active Session & Term Badge (Locked) */}
-        <div className="flex items-center gap-3">
-          <div className="flex items-center bg-indigo-50 border border-indigo-200 text-indigo-800 px-3 py-1.5 rounded-lg text-xs font-semibold shadow-xs">
-            <Clock className="h-3.5 w-3.5 mr-1.5 text-indigo-600" />
+        {/* Central Active Period Badge */}
+        {hasActiveTerm && activeSession && (
+          <div className="inline-flex items-center space-x-2 bg-indigo-50 border border-indigo-200 text-indigo-700 px-3.5 py-1.5 rounded-full text-xs font-semibold self-start sm:self-auto shadow-xs">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
             <span>
-              Active Term: {activeSessionYear ? `${activeSessionYear} — ` : ''}{activeTermName || 'Current Term'}
+              Active Period: {activeSession.year} · Term {activeSession.currentTerm}
             </span>
           </div>
-          <div className="text-xs text-gray-500 bg-gray-100 px-2.5 py-1.5 rounded-md border border-gray-200">
-            Exam: <strong className="text-gray-900">{assessmentConfig.examMax}</strong> | Mid-Term: <strong className="text-gray-900">{assessmentConfig.midtermMax}</strong>
-          </div>
-        </div>
+        )}
       </div>
 
       {/* Global Alerts */}
-      {errorMessage && (
-        <div className="p-4 bg-red-50 border-l-4 border-red-500 rounded text-sm text-red-700 flex items-center justify-between">
-          <span>{errorMessage}</span>
-          <button onClick={() => setErrorMessage(null)} className="text-red-500 font-bold hover:text-red-700">✕</button>
+      {saveSuccess && (
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-4 rounded-lg flex items-center shadow-xs">
+          <CheckCircle className="h-5 w-5 text-emerald-500 mr-3 flex-shrink-0" />
+          <span className="text-sm font-medium">{saveSuccess}</span>
         </div>
       )}
-      {saveSuccess && (
-        <div className="p-4 bg-green-50 border-l-4 border-green-500 rounded text-sm text-green-700 flex items-center justify-between">
-          <span className="flex items-center">
-            <CheckCircle className="h-4 w-4 mr-2" />
-            {saveSuccess}
-          </span>
-          <button onClick={() => setSaveSuccess(null)} className="text-green-500 font-bold hover:text-green-700">✕</button>
+      {errorMessage && (
+        <div className="bg-rose-50 border border-rose-200 text-rose-800 p-4 rounded-lg flex items-center shadow-xs">
+          <AlertCircle className="h-5 w-5 text-rose-500 mr-3 flex-shrink-0" />
+          <span className="text-sm font-medium">{errorMessage}</span>
         </div>
       )}
 
@@ -615,76 +844,87 @@ const ResultEntry: React.FC = () => {
       {/* STEP 1: CLASS SELECTION */}
       {/* ========================================================================= */}
       {currentStep === 'classes' && (
-        <div className="space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white p-4 rounded-lg shadow-sm border border-gray-200">
+        <div className="space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div className="relative flex-1 max-w-md">
-              <Search className="h-4 w-4 text-gray-400 absolute left-3 top-3" />
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
               <input
                 type="text"
-                placeholder="Search class name or assigned teacher..."
+                placeholder="Search classes or teachers..."
                 value={classSearch}
                 onChange={(e) => setClassSearch(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                className="w-full pl-10 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
               />
             </div>
-            <p className="text-xs text-gray-500">
-              Showing {filteredClasses.length} {filteredClasses.length === 1 ? 'class' : 'classes'}
-            </p>
+            <div className="text-xs text-gray-500">
+              Showing {filteredClasses.length} class{filteredClasses.length === 1 ? '' : 'es'}
+            </div>
           </div>
 
           {loading ? (
-            <div className="p-12 text-center text-gray-500">Loading classes...</div>
+            <div className="p-12 text-center text-gray-500">
+              <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mb-2"></div>
+              <p>Loading school classes...</p>
+            </div>
           ) : filteredClasses.length === 0 ? (
-            <div className="p-12 text-center bg-white rounded-lg border border-gray-200">
-              <BookOpen className="h-10 w-10 text-gray-400 mx-auto mb-2" />
-              <p className="text-gray-700 font-medium">No classes found</p>
-              <p className="text-xs text-gray-500 mt-1">
-                {currentUser?.role === 'teacher'
-                  ? 'You have not been assigned to any classes for result entry.'
-                  : 'No classes match your search query.'}
-              </p>
+            <div className="bg-white border rounded-lg p-10 text-center text-gray-500">
+              <BookOpen className="h-10 w-10 mx-auto text-gray-400 mb-2" />
+              <p className="font-semibold text-gray-700">No classes found</p>
+              <p className="text-xs mt-1">Try adjusting your search filter or add classes in Settings.</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
               {filteredClasses.map((cls) => {
                 const className = typeof cls.classLevelId === 'object' ? cls.classLevelId.name : cls.name || 'Class';
-                const teachers = cls.assignedTeachers && cls.assignedTeachers.length > 0
-                  ? cls.assignedTeachers.join(', ')
-                  : 'No teacher assigned';
-                const studentCount = cls.studentCount ?? 0;
+                const arm = cls.arm || '';
+                const progress = classProgressMap[cls._id] || { completed: 0, total: 0 };
+                const percent = progress.total > 0 ? Math.round((progress.completed / progress.total) * 100) : 0;
 
                 return (
                   <div
                     key={cls._id}
                     onClick={() => handleSelectClass(cls)}
-                    className="bg-white p-5 rounded-lg border border-gray-200 shadow-sm hover:border-indigo-500 hover:shadow-md transition-all cursor-pointer flex flex-col justify-between group"
+                    className="bg-white rounded-xl border border-gray-200 shadow-xs hover:shadow-md hover:border-indigo-400 p-5 cursor-pointer transition-all flex flex-col justify-between group"
                   >
                     <div>
-                      <div className="flex items-start justify-between mb-3">
-                        <div className="h-10 w-10 rounded-lg bg-indigo-50 text-indigo-700 flex items-center justify-center font-bold text-sm group-hover:bg-indigo-600 group-hover:text-white transition-colors">
-                          {className.substring(0, 3)}
+                      <div className="flex items-start justify-between">
+                        <div className="h-10 w-10 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-sm">
+                          {arm || 'C'}
                         </div>
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-gray-100 text-gray-800">
-                          Arm: {cls.arm}
+                        <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-gray-100 text-gray-700">
+                          {cls.studentCount ?? progress.total} Students
                         </span>
                       </div>
-                      <h3 className="text-lg font-bold text-gray-900 group-hover:text-indigo-600 transition-colors">
-                        {className} - {cls.arm}
+
+                      <h3 className="text-lg font-bold text-gray-900 mt-3 group-hover:text-indigo-600 transition-colors">
+                        {className} - {arm}
                       </h3>
-                      <p className="text-xs text-gray-500 mt-1 line-clamp-1">
-                        <UserCheck className="inline h-3.5 w-3.5 mr-1 text-gray-400" />
-                        {teachers}
+
+                      <p className="text-xs text-gray-500 mt-1">
+                        Teacher(s):{' '}
+                        <span className="text-gray-700 font-medium">
+                          {cls.assignedTeachers && cls.assignedTeachers.length > 0
+                            ? cls.assignedTeachers.join(', ')
+                            : 'Unassigned'}
+                        </span>
                       </p>
                     </div>
 
-                    <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between">
-                      <span className="text-xs text-gray-600 flex items-center">
-                        <Users className="h-3.5 w-3.5 mr-1 text-gray-400" />
-                        {studentCount} Students
-                      </span>
-                      <span className="text-xs font-semibold text-indigo-600 group-hover:translate-x-0.5 transition-transform inline-flex items-center">
-                        Enter Scores <ChevronRight className="h-3.5 w-3.5 ml-0.5" />
-                      </span>
+                    <div className="mt-5 pt-4 border-t border-gray-100">
+                      <div className="flex items-center justify-between text-xs text-gray-600 mb-1.5">
+                        <span>Completion Progress</span>
+                        <span className="font-semibold text-indigo-600">{percent}%</span>
+                      </div>
+                      <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                        <div
+                          className="bg-indigo-600 h-1.5 rounded-full transition-all"
+                          style={{ width: `${percent}%` }}
+                        ></div>
+                      </div>
+                      <div className="mt-3 flex items-center justify-between text-xs text-indigo-600 font-medium">
+                        <span>Open class students</span>
+                        <ChevronRight className="h-4 w-4 group-hover:translate-x-1 transition-transform" />
+                      </div>
                     </div>
                   </div>
                 );
@@ -695,157 +935,158 @@ const ResultEntry: React.FC = () => {
       )}
 
       {/* ========================================================================= */}
-      {/* STEP 2: STUDENT SELECTION */}
+      {/* STEP 2: STUDENT SELECTION IN CLASS */}
       {/* ========================================================================= */}
       {currentStep === 'students' && selectedClass && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <button
-              onClick={() => {
-                setCurrentStep('classes');
-                setSelectedClass(null);
-              }}
-              className="inline-flex items-center text-xs font-semibold text-gray-600 hover:text-indigo-600"
-            >
-              <ArrowLeft className="h-3.5 w-3.5 mr-1" />
-              Back to Classes
-            </button>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-gray-500">Performance Type:</span>
-              <div className="inline-flex rounded-md shadow-xs" role="group">
-                <button
-                  type="button"
-                  onClick={() => setPerformanceType('term')}
-                  className={`px-3 py-1 text-xs font-semibold rounded-l-md border ${
-                    performanceType === 'term'
-                      ? 'bg-indigo-600 text-white border-indigo-600'
-                      : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                  }`}
-                >
-                  Full Term
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPerformanceType('mid-term')}
-                  className={`px-3 py-1 text-xs font-semibold rounded-r-md border ${
-                    performanceType === 'mid-term'
-                      ? 'bg-indigo-600 text-white border-indigo-600'
-                      : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                  }`}
-                >
-                  Mid-Term
-                </button>
-              </div>
+        <div className="space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white p-4 rounded-lg border border-gray-200 shadow-xs">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => {
+                  setCurrentStep('classes');
+                  setSelectedClass(null);
+                }}
+                className="inline-flex items-center text-xs font-semibold text-gray-600 hover:text-indigo-600"
+              >
+                <ArrowLeft className="h-3.5 w-3.5 mr-1" />
+                Change Class
+              </button>
+              <span className="text-gray-300">|</span>
+              <span className="text-xs text-gray-500">
+                Class:{' '}
+                <strong className="text-gray-800">
+                  {typeof selectedClass.classLevelId === 'object' ? selectedClass.classLevelId.name : selectedClass.name} - {selectedClass.arm}
+                </strong>
+              </span>
             </div>
+
+            <button
+              onClick={handleOpenLeaderboard}
+              className="inline-flex items-center px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold rounded-lg shadow-xs transition-colors self-start sm:self-auto cursor-pointer"
+            >
+              <Trophy className="h-3.5 w-3.5 mr-1.5" />
+              Class Leaderboard & Rankings
+            </button>
           </div>
 
-          <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          {/* Search & Status Filters */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div className="relative flex-1 max-w-md">
-              <Search className="h-4 w-4 text-gray-400 absolute left-3 top-3" />
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
               <input
                 type="text"
-                placeholder="Search student by name or admission number..."
+                placeholder="Search student by name or admission no..."
                 value={studentSearch}
                 onChange={(e) => setStudentSearch(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                className="w-full pl-10 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
               />
             </div>
 
             <div className="flex items-center gap-2">
-              {(['all', 'completed', 'pending'] as const).map((tab) => (
-                <button
-                  key={tab}
-                  onClick={() => setStudentFilter(tab)}
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium capitalize ${
-                    studentFilter === tab
-                      ? 'bg-indigo-100 text-indigo-700 font-semibold'
-                      : 'text-gray-600 hover:bg-gray-100'
-                  }`}
-                >
-                  {tab}
-                </button>
-              ))}
+              <button
+                onClick={() => setStudentFilter('all')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-md border ${
+                  studentFilter === 'all'
+                    ? 'bg-indigo-600 text-white border-indigo-600'
+                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                }`}
+              >
+                All ({students.length})
+              </button>
+              <button
+                onClick={() => setStudentFilter('completed')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-md border ${
+                  studentFilter === 'completed'
+                    ? 'bg-emerald-600 text-white border-emerald-600'
+                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                }`}
+              >
+                Completed
+              </button>
+              <button
+                onClick={() => setStudentFilter('pending')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-md border ${
+                  studentFilter === 'pending'
+                    ? 'bg-amber-600 text-white border-amber-600'
+                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                }`}
+              >
+                Pending
+              </button>
             </div>
           </div>
 
+          {/* Students Table */}
           {loading ? (
-            <div className="p-12 text-center text-gray-500">Loading students...</div>
+            <div className="p-12 text-center text-gray-500">
+              <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mb-2"></div>
+              <p>Loading class students...</p>
+            </div>
           ) : filteredStudents.length === 0 ? (
-            <div className="p-12 text-center bg-white rounded-lg border border-gray-200">
-              <Users className="h-10 w-10 text-gray-400 mx-auto mb-2" />
-              <p className="text-gray-700 font-medium">No students found</p>
-              <p className="text-xs text-gray-500 mt-1">
-                There are no active students in this class matching your filter.
-              </p>
+            <div className="bg-white border rounded-lg p-10 text-center text-gray-500">
+              <Users className="h-10 w-10 mx-auto text-gray-400 mb-2" />
+              <p className="font-semibold text-gray-700">No students found</p>
+              <p className="text-xs mt-1">There are no active students in this class matching your filter.</p>
             </div>
           ) : (
-            <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+            <div className="bg-white rounded-lg border border-gray-200 shadow-xs overflow-hidden">
               <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
+                <thead className="bg-gray-50 text-xs font-semibold text-gray-500 uppercase tracking-wider">
                   <tr>
-                    <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                      Student
-                    </th>
-                    <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                      Admission No
-                    </th>
-                    <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                      Status
-                    </th>
-                    <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                      Verification Code
-                    </th>
-                    <th className="px-5 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                      Action
-                    </th>
+                    <th className="px-5 py-3 text-left">Student Name</th>
+                    <th className="px-5 py-3 text-left">Admission No</th>
+                    <th className="px-5 py-3 text-left">Status</th>
+                    <th className="px-5 py-3 text-left">Position</th>
+                    <th className="px-5 py-3 text-left">Overall %</th>
+                    <th className="px-5 py-3 text-left">Verification Code</th>
+                    <th className="px-5 py-3 text-right">Action</th>
                   </tr>
                 </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
+                <tbody className="divide-y divide-gray-200">
                   {filteredStudents.map((student) => {
                     const cInfo = completionMap[student._id];
-                    const isComplete = cInfo?.isComplete;
-                    const enteredCount = cInfo?.enteredCount || 0;
-                    const vCode = cInfo?.verificationCode || '';
+                    const isComplete = Boolean(cInfo?.isComplete);
+                    const position = cInfo?.classPosition;
+                    const percent = cInfo?.percentage || cInfo?.averageScore;
+                    const vCode = cInfo?.verificationCode;
 
                     return (
                       <tr
                         key={student._id}
                         onClick={() => handleSelectStudent(student)}
-                        className="hover:bg-indigo-50/40 cursor-pointer transition-colors"
+                        className="hover:bg-indigo-50/50 cursor-pointer transition-colors"
                       >
                         <td className="px-5 py-3.5 whitespace-nowrap">
                           <div className="flex items-center">
-                            {student.photo ? (
-                              <img
-                                src={student.photo}
-                                alt={student.fullName}
-                                className="h-9 w-9 rounded-full object-cover mr-3 border"
-                              />
-                            ) : (
-                              <div className="h-9 w-9 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-xs mr-3">
-                                {student.fullName.charAt(0).toUpperCase()}
-                              </div>
-                            )}
-                            <div className="text-sm font-semibold text-gray-900">{student.fullName}</div>
+                            <div className="h-8 w-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-xs mr-3">
+                              {student.fullName.charAt(0).toUpperCase()}
+                            </div>
+                            <span className="text-sm font-semibold text-gray-900">{student.fullName}</span>
                           </div>
                         </td>
-                        <td className="px-5 py-3.5 whitespace-nowrap text-sm text-gray-600 font-mono">
+                        <td className="px-5 py-3.5 whitespace-nowrap text-xs font-mono text-gray-600">
                           {student.admissionNo}
                         </td>
-                        <td className="px-5 py-3.5 whitespace-nowrap text-sm">
+                        <td className="px-5 py-3.5 whitespace-nowrap">
                           {isComplete ? (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-green-100 text-green-800">
-                              <CheckCircle className="h-3 w-3 mr-1" /> Completed
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">
+                              <CheckCircle className="h-3 w-3 mr-1 text-emerald-600" /> Completed
                             </span>
-                          ) : enteredCount > 0 ? (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-amber-100 text-amber-800">
-                              <Clock className="h-3 w-3 mr-1" /> In Progress ({enteredCount})
+                          ) : cInfo?.enteredCount > 0 ? (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800">
+                              <Clock className="h-3 w-3 mr-1 text-amber-600" /> In Progress ({cInfo.enteredCount}/{cInfo.expectedCount})
                             </span>
                           ) : (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-gray-100 text-gray-600">
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-600">
                               Not Started
                             </span>
                           )}
+                        </td>
+                        <td className="px-5 py-3.5 whitespace-nowrap text-sm font-bold text-gray-800">
+                          {isComplete && position ? `#${position}` : '—'}
+                        </td>
+                        <td className="px-5 py-3.5 whitespace-nowrap text-sm font-semibold text-gray-800">
+                          {isComplete && percent !== undefined ? `${percent}%` : '—'}
                         </td>
                         <td className="px-5 py-3.5 whitespace-nowrap text-xs font-mono text-gray-500">
                           {vCode || '—'}
@@ -869,11 +1110,12 @@ const ResultEntry: React.FC = () => {
       )}
 
       {/* ========================================================================= */}
-      {/* STEP 3: SCORE ENTRY & COMMENTS */}
+      {/* STEP 3: SCORE ENTRY & COMPLETION */}
       {/* ========================================================================= */}
       {currentStep === 'entry' && selectedStudent && selectedClass && (
         <div className="space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
+          {/* Top Bar with Navigation & Assessment Type Toggle */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white p-4 rounded-lg border border-gray-200 shadow-xs">
             <button
               onClick={() => {
                 setCurrentStep('students');
@@ -915,7 +1157,7 @@ const ResultEntry: React.FC = () => {
           </div>
 
           {/* Student Profile Card */}
-          <div className="bg-white p-5 rounded-lg border border-gray-200 shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div className="bg-white p-5 rounded-lg border border-gray-200 shadow-xs flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div className="flex items-center">
               {selectedStudent.photo ? (
                 <img
@@ -929,35 +1171,88 @@ const ResultEntry: React.FC = () => {
                 </div>
               )}
               <div>
-                <h2 className="text-lg font-bold text-gray-900">{selectedStudent.fullName}</h2>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-bold text-gray-900">{selectedStudent.fullName}</h2>
+                  {isCompleted ? (
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">
+                      <CheckCircle className="h-3.5 w-3.5 mr-1 text-emerald-600" /> Completed
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800">
+                      <Clock className="h-3.5 w-3.5 mr-1 text-amber-600" /> In Progress
+                    </span>
+                  )}
+                </div>
                 <div className="flex items-center gap-3 text-xs text-gray-500 mt-0.5">
-                  <span>Admission No: <strong className="font-mono text-gray-700">{selectedStudent.admissionNo}</strong></span>
+                  <span>
+                    Admission No: <strong className="font-mono text-gray-700">{selectedStudent.admissionNo}</strong>
+                  </span>
                   <span>•</span>
-                  <span>Class: <strong className="text-gray-700">{typeof selectedClass.classLevelId === 'object' ? selectedClass.classLevelId.name : selectedClass.name} - {selectedClass.arm}</strong></span>
+                  <span>
+                    Class:{' '}
+                    <strong className="text-gray-700">
+                      {typeof selectedClass.classLevelId === 'object' ? selectedClass.classLevelId.name : selectedClass.name} - {selectedClass.arm}
+                    </strong>
+                  </span>
                 </div>
               </div>
             </div>
 
-            {verificationCode && (
-              <div className="inline-flex items-center space-x-2 bg-indigo-50 border border-indigo-200 text-indigo-700 px-3 py-1.5 rounded-lg text-xs font-mono font-semibold self-start md:self-auto">
-                <span>Code: {verificationCode}</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    navigator.clipboard.writeText(verificationCode);
-                    alert('Verification code copied to clipboard!');
-                  }}
-                  className="p-1 hover:bg-indigo-100 rounded text-indigo-600"
-                  title="Copy verification code"
-                >
-                  <Copy className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            )}
+            <div className="flex flex-wrap items-center gap-3 self-start md:self-auto">
+              {isCompleted && classPosition && (
+                <div className="bg-indigo-50 border border-indigo-200 px-3 py-1.5 rounded-lg text-xs font-semibold text-indigo-900">
+                  Rank: <span className="text-indigo-600 font-bold">#{classPosition}</span> | Overall: <span className="text-indigo-600 font-bold">{studentPercentage}%</span>
+                </div>
+              )}
+              {verificationCode && (
+                <div className="inline-flex items-center space-x-2 bg-gray-50 border border-gray-200 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-mono font-semibold">
+                  <span>Code: {verificationCode}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(verificationCode);
+                      alert('Verification code copied!');
+                    }}
+                    className="p-1 hover:bg-gray-200 rounded text-gray-600"
+                    title="Copy code"
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
 
+          {/* Completed Result Banner */}
+          {isCompleted && (
+            <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="flex items-center">
+                <CheckCircle className="h-5 w-5 text-emerald-600 mr-2.5 flex-shrink-0" />
+                <div className="text-xs text-emerald-900">
+                  <p className="font-bold">This student result has been completed.</p>
+                  <p className="text-emerald-700 mt-0.5">
+                    Completed on {completedAt ? new Date(completedAt).toLocaleDateString() : 'N/A'}.
+                    {classPosition ? ` Position: #${classPosition} | Class Average: ${classAverage}%` : ''}
+                  </p>
+                </div>
+              </div>
+
+              {currentUser?.role === 'admin' && (
+                <button
+                  type="button"
+                  onClick={handleReopenResult}
+                  disabled={reopening}
+                  className="px-3.5 py-1.5 bg-white border border-emerald-300 text-emerald-800 hover:bg-emerald-100 text-xs font-semibold rounded-md shadow-2xs self-start sm:self-auto cursor-pointer"
+                >
+                  <RefreshCw className="h-3.5 w-3.5 mr-1.5 inline" />
+                  {reopening ? 'Reopening...' : 'Reopen for Corrections'}
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Subject Scores Table */}
-          <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+          <div className="bg-white rounded-lg border border-gray-200 shadow-xs overflow-hidden">
             <div className="p-4 border-b border-gray-200 flex items-center justify-between">
               <div>
                 <h3 className="text-md font-bold text-gray-900">
@@ -1112,20 +1407,21 @@ const ResultEntry: React.FC = () => {
           {/* Psychomotor & Affective Domains (Full Term Only) */}
           {performanceType === 'term' && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="bg-white p-5 rounded-lg border border-gray-200 shadow-sm">
+              <div className="bg-white p-5 rounded-lg border border-gray-200 shadow-xs">
                 <h3 className="text-md font-bold text-gray-900 mb-3">Psychomotor Skills (Scale: 1-5)</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {psychomotorSkills.map((item, index) => (
                     <div key={item.trait} className="flex items-center justify-between p-2 bg-gray-50 rounded">
                       <span className="text-xs font-medium text-gray-700">{item.trait}</span>
                       <select
+                        disabled={isCompleted && currentUser?.role !== 'admin'}
                         value={item.rating}
                         onChange={(e) => {
                           const updated = [...psychomotorSkills];
                           updated[index].rating = parseInt(e.target.value);
                           setPsychomotorSkills(updated);
                         }}
-                        className="px-2 py-1 text-xs border border-gray-300 rounded bg-white"
+                        className="px-2 py-1 text-xs border border-gray-300 rounded bg-white disabled:bg-gray-100"
                       >
                         {[1, 2, 3, 4, 5].map((r) => (
                           <option key={r} value={r}>{r}</option>
@@ -1136,20 +1432,21 @@ const ResultEntry: React.FC = () => {
                 </div>
               </div>
 
-              <div className="bg-white p-5 rounded-lg border border-gray-200 shadow-sm">
+              <div className="bg-white p-5 rounded-lg border border-gray-200 shadow-xs">
                 <h3 className="text-md font-bold text-gray-900 mb-3">Affective Domain (Scale: 1-5)</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {affectiveDomain.map((item, index) => (
                     <div key={item.trait} className="flex items-center justify-between p-2 bg-gray-50 rounded">
                       <span className="text-xs font-medium text-gray-700">{item.trait}</span>
                       <select
+                        disabled={isCompleted && currentUser?.role !== 'admin'}
                         value={item.rating}
                         onChange={(e) => {
                           const updated = [...affectiveDomain];
                           updated[index].rating = parseInt(e.target.value);
                           setAffectiveDomain(updated);
                         }}
-                        className="px-2 py-1 text-xs border border-gray-300 rounded bg-white"
+                        className="px-2 py-1 text-xs border border-gray-300 rounded bg-white disabled:bg-gray-100"
                       >
                         {[1, 2, 3, 4, 5].map((r) => (
                           <option key={r} value={r}>{r}</option>
@@ -1164,19 +1461,20 @@ const ResultEntry: React.FC = () => {
 
           {/* Comments Section */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-white p-5 rounded-lg border border-gray-200 shadow-sm">
-              <h3 className="text-sm font-bold text-gray-900 mb-2">Teacher's Remark / Comment</h3>
+            <div className="bg-white p-5 rounded-lg border border-gray-200 shadow-xs">
+              <h3 className="text-sm font-bold text-gray-900 mb-2">Teacher's Remark / Comment (Required for completion)</h3>
               <textarea
+                disabled={isCompleted && currentUser?.role !== 'admin'}
                 rows={3}
                 placeholder="Enter teacher remark regarding student progress..."
                 value={teacherComment}
                 onChange={(e) => setTeacherComment(e.target.value)}
-                className="w-full p-2.5 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                className="w-full p-2.5 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100"
               />
             </div>
 
             {currentUser?.role === 'admin' && (
-              <div className="bg-white p-5 rounded-lg border border-gray-200 shadow-sm">
+              <div className="bg-white p-5 rounded-lg border border-gray-200 shadow-xs">
                 <h3 className="text-sm font-bold text-gray-900 mb-2">Head of School's Comment (Admin Only)</h3>
                 <textarea
                   rows={3}
@@ -1189,28 +1487,189 @@ const ResultEntry: React.FC = () => {
             )}
           </div>
 
+          {/* Phase 1: Completion Requirements Status Box */}
+          {!isCompleted && (
+            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-gray-600 mb-2.5">
+                Result Completion Checklist (All items required before completing)
+              </h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                <div className={`flex items-center gap-2 p-2 rounded ${completionValidation.isScoresComplete ? 'bg-emerald-50 text-emerald-800' : 'bg-rose-50 text-rose-800'}`}>
+                  {completionValidation.isScoresComplete ? <CheckCircle className="h-4 w-4 text-emerald-600" /> : <AlertCircle className="h-4 w-4 text-rose-600" />}
+                  <span>Scores: {completionValidation.isScoresComplete ? 'All subjects entered' : `${completionValidation.missingSubjects.length} missing`}</span>
+                </div>
+
+                {performanceType === 'term' && (
+                  <>
+                    <div className={`flex items-center gap-2 p-2 rounded ${completionValidation.isPsychomotorComplete ? 'bg-emerald-50 text-emerald-800' : 'bg-rose-50 text-rose-800'}`}>
+                      {completionValidation.isPsychomotorComplete ? <CheckCircle className="h-4 w-4 text-emerald-600" /> : <AlertCircle className="h-4 w-4 text-rose-600" />}
+                      <span>Psychomotor: {completionValidation.isPsychomotorComplete ? 'All rated' : 'Incomplete'}</span>
+                    </div>
+
+                    <div className={`flex items-center gap-2 p-2 rounded ${completionValidation.isAffectiveComplete ? 'bg-emerald-50 text-emerald-800' : 'bg-rose-50 text-rose-800'}`}>
+                      {completionValidation.isAffectiveComplete ? <CheckCircle className="h-4 w-4 text-emerald-600" /> : <AlertCircle className="h-4 w-4 text-rose-600" />}
+                      <span>Affective: {completionValidation.isAffectiveComplete ? 'All rated' : 'Incomplete'}</span>
+                    </div>
+                  </>
+                )}
+
+                <div className={`flex items-center gap-2 p-2 rounded ${completionValidation.isTeacherCommentComplete ? 'bg-emerald-50 text-emerald-800' : 'bg-rose-50 text-rose-800'}`}>
+                  {completionValidation.isTeacherCommentComplete ? <CheckCircle className="h-4 w-4 text-emerald-600" /> : <AlertCircle className="h-4 w-4 text-rose-600" />}
+                  <span>Teacher's Comment: {completionValidation.isTeacherCommentComplete ? 'Provided' : 'Required'}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Action Bar */}
-          <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm flex items-center justify-between">
+          <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
             <button
               type="button"
               onClick={() => {
                 setCurrentStep('students');
                 setSelectedStudent(null);
               }}
-              className="px-4 py-2 border border-gray-300 text-xs font-semibold rounded-md text-gray-700 hover:bg-gray-50"
+              className="px-4 py-2 border border-gray-300 text-xs font-semibold rounded-md text-gray-700 hover:bg-gray-50 self-start sm:self-auto cursor-pointer"
             >
-              Cancel
+              Back to Student List
             </button>
 
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={saving || Object.keys(validationErrors).length > 0}
-              className="inline-flex items-center px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-md shadow-sm disabled:bg-gray-400 cursor-pointer"
-            >
-              <Save className="h-4 w-4 mr-1.5" />
-              {saving ? 'Saving...' : 'Save Student Result'}
-            </button>
+            <div className="flex items-center gap-3 self-end sm:self-auto">
+              {!isCompleted && (
+                <button
+                  type="button"
+                  onClick={handleSaveDraft}
+                  disabled={saving || Object.keys(validationErrors).length > 0}
+                  className="inline-flex items-center px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs font-semibold rounded-md shadow-2xs disabled:opacity-50 cursor-pointer"
+                >
+                  <Save className="h-3.5 w-3.5 mr-1.5" />
+                  {saving ? 'Saving...' : 'Save Draft'}
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={handleCompleteResult}
+                disabled={!completionValidation.canComplete || completing || isCompleted}
+                className="inline-flex items-center px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-md shadow-sm disabled:bg-gray-300 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                title={!completionValidation.canComplete ? 'Complete all required subject scores, domains and teacher comment to enable' : 'Mark result as completed and compute class rankings'}
+              >
+                <CheckCircle className="h-4 w-4 mr-1.5" />
+                {completing ? 'Completing...' : isCompleted ? 'Result Completed' : 'Complete Result'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* LEADERBOARD MODAL (Phase 2 & Phase 5) */}
+      {/* ========================================================================= */}
+      {showLeaderboardModal && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-gray-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-3xl w-full shadow-2xl border border-gray-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-6 py-4 bg-gradient-to-r from-indigo-700 to-indigo-900 text-white flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <Trophy className="h-6 w-6 text-amber-300" />
+                <div>
+                  <h3 className="text-lg font-bold">Class Academic Leaderboard</h3>
+                  <p className="text-xs text-indigo-200">
+                    {selectedClass ? `${typeof selectedClass.classLevelId === 'object' ? selectedClass.classLevelId.name : selectedClass.name} - ${selectedClass.arm}` : ''} · Official Competition Ranking
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowLeaderboardModal(false)}
+                className="text-indigo-200 hover:text-white p-1 rounded-lg"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="p-6">
+              {loadingLeaderboard ? (
+                <div className="py-12 text-center text-gray-500">
+                  <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mb-2"></div>
+                  <p className="text-xs">Calculating class positions and rankings...</p>
+                </div>
+              ) : !leaderboardData || leaderboardData.leaderboard?.length === 0 ? (
+                <div className="py-12 text-center text-gray-500">
+                  <Trophy className="h-10 w-10 mx-auto text-gray-300 mb-2" />
+                  <p className="font-bold text-gray-700">No completed results yet</p>
+                  <p className="text-xs mt-1 text-gray-500">
+                    Students will appear on the published leaderboard once their teacher completes their result sheet.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {/* Summary Bar */}
+                  <div className="grid grid-cols-3 gap-4 bg-indigo-50/70 p-4 rounded-xl border border-indigo-100 text-center">
+                    <div>
+                      <p className="text-xs text-indigo-600 font-medium">Eligible Ranked Students</p>
+                      <p className="text-xl font-bold text-indigo-950">{leaderboardData.completedStudentsCount} / {leaderboardData.totalStudentsInClass}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-indigo-600 font-medium">Class Average Percentage</p>
+                      <p className="text-xl font-bold text-indigo-950">{leaderboardData.classAveragePercentage}%</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-indigo-600 font-medium">Ranking Rule</p>
+                      <p className="text-xs font-semibold text-indigo-900 mt-1">Competition (1st, 1st, 3rd)</p>
+                    </div>
+                  </div>
+
+                  <div className="max-h-96 overflow-y-auto rounded-lg border border-gray-200">
+                    <table className="min-w-full divide-y divide-gray-200 text-xs">
+                      <thead className="bg-gray-50 font-semibold text-gray-500 sticky top-0">
+                        <tr>
+                          <th className="px-4 py-2.5 text-left">Rank</th>
+                          <th className="px-4 py-2.5 text-left">Student Name</th>
+                          <th className="px-4 py-2.5 text-left">Admission No</th>
+                          <th className="px-4 py-2.5 text-right">Marks</th>
+                          <th className="px-4 py-2.5 text-right">Overall %</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {leaderboardData.leaderboard.map((item: any) => (
+                          <tr key={item.studentId} className={item.position === 1 ? 'bg-amber-50/40 font-semibold' : ''}>
+                            <td className="px-4 py-2.5 whitespace-nowrap">
+                              <span className={`inline-flex items-center justify-center h-6 w-6 rounded-full font-bold text-xs ${
+                                item.position === 1 ? 'bg-amber-100 text-amber-800' :
+                                item.position === 2 ? 'bg-slate-200 text-slate-800' :
+                                item.position === 3 ? 'bg-amber-200/60 text-amber-900' : 'text-gray-700'
+                              }`}>
+                                {item.position}
+                              </span>
+                            </td>
+                            <td className="px-4 py-2.5 whitespace-nowrap text-gray-900 font-medium">
+                              {item.fullName}
+                            </td>
+                            <td className="px-4 py-2.5 whitespace-nowrap font-mono text-gray-500">
+                              {item.admissionNo}
+                            </td>
+                            <td className="px-4 py-2.5 whitespace-nowrap text-right text-gray-700 font-medium">
+                              {item.totalScore} / {item.totalAvailableMarks}
+                            </td>
+                            <td className="px-4 py-2.5 whitespace-nowrap text-right text-indigo-700 font-bold">
+                              {item.overallPercentage}%
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="px-6 py-3 bg-gray-50 border-t border-gray-100 text-right">
+              <button
+                onClick={() => setShowLeaderboardModal(false)}
+                className="px-4 py-1.5 bg-gray-200 hover:bg-gray-300 text-gray-800 text-xs font-semibold rounded-md"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -41,8 +41,18 @@ export interface IStudentResult extends Document {
   teacherComment: string;
   headOfSchoolComment: string;
   isReleased: boolean;
+  isCompleted: boolean;
+  completedBy?: mongoose.Types.ObjectId;
+  completedAt?: Date;
+  isApproved: boolean;
+  approvedBy?: mongoose.Types.ObjectId;
+  approvedAt?: Date;
+  reopenedBy?: mongoose.Types.ObjectId;
+  reopenedAt?: Date;
   totalScore: number;
+  totalAvailableMarks: number;
   averageScore: number;
+  percentage: number;
   classPosition: number;
   classAverage: number;
   attendanceSummary: IAttendanceSummary;
@@ -193,11 +203,48 @@ const StudentResultSchema: Schema = new Schema({
     type: Boolean,
     default: false,
   },
+  isCompleted: {
+    type: Boolean,
+    default: false,
+  },
+  completedBy: {
+    type: Schema.Types.ObjectId,
+    ref: 'User',
+  },
+  completedAt: {
+    type: Date,
+  },
+  isApproved: {
+    type: Boolean,
+    default: false,
+  },
+  approvedBy: {
+    type: Schema.Types.ObjectId,
+    ref: 'User',
+  },
+  approvedAt: {
+    type: Date,
+  },
+  reopenedBy: {
+    type: Schema.Types.ObjectId,
+    ref: 'User',
+  },
+  reopenedAt: {
+    type: Date,
+  },
   totalScore: {
     type: Number,
     default: 0,
   },
+  totalAvailableMarks: {
+    type: Number,
+    default: 0,
+  },
   averageScore: {
+    type: Number,
+    default: 0,
+  },
+  percentage: {
     type: Number,
     default: 0,
   },

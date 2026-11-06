@@ -1,1125 +1,1228 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import api from '../services/api';
+import {
+  Search,
+  Plus,
+  Trash2,
+  Printer,
+  ArrowLeft,
+  CheckCircle,
+  AlertCircle,
+  Clock,
+  ChevronRight,
+  ShieldAlert,
+  FileText,
+  Building,
+  RefreshCw,
+  X,
+} from 'lucide-react';
 
-interface Student {
+interface ClassSummary {
   _id: string;
+  name: string;
+  className: string;
+  arm: string;
+  assignedTeachers: string[];
+  studentCount: number;
+  billingStatus: 'not_billed' | 'partial' | 'billed';
+  invoicesCount: number;
+  totalAmountDue: number;
+  totalPaid: number;
+  totalOutstanding: number;
+}
+
+interface StudentInvoice {
+  _id: string;
+  invoiceNumber: string;
+  studentId: string;
   fullName: string;
   admissionNo: string;
-}
-
-interface AcademicSession {
-  _id: string;
-  year: string;
-  currentTerm: 'first' | 'second' | 'third';
-  createdAt: string;
-}
-
-interface ClassGroup {
-  _id: string;
-  name: string;
-  arm: string;
-}
-
-interface BillLineItem {
-  label: string;
-  amount: number;
-}
-
-interface BillAppliesTo {
-  type: 'class' | 'school';
-  classId?: string;
-}
-
-interface BillTemplate {
-  _id: string;
-  schoolId: string;
-  termId: string;
-  name: string;
-  lineItems: BillLineItem[];
-  totalAmount: number;
-  appliesTo: BillAppliesTo;
-  createdAt: string;
-  term?: AcademicSession;
-  appliesToClass?: ClassGroup;
-}
-
-interface FeeInvoice {
-  _id: string;
-  studentId: Student;
-  termId: AcademicSession;
-  billTemplate?: BillTemplate;
+  gender?: string;
+  currentTermCharges: number;
+  previousTermCarryover: number;
   amountDue: number;
-  dueDate: string;
+  amountPaid: number;
+  remainingBalance: number;
   status: 'unpaid' | 'partial' | 'paid';
-  credit: number;
+  dueDate: string;
+  lineItems: Array<{ name: string; amount: number; isTuition?: boolean; isCarryover?: boolean }>;
   createdAt: string;
 }
 
-interface FeePayment {
-  _id: string;
-  invoiceId: string;
+interface CarryoverPreviewStudent {
   studentId: string;
-  amountPaid: number;
-  paidAt: string;
-  recordedBy: any;
-  note?: string;
+  fullName: string;
+  admissionNo: string;
+  gender?: string;
+  previousTermCarryover: number;
+  carryoverSources: Array<{ invoiceId: string; termName: string; amount: number }>;
 }
 
-interface FeesDashboard {
-  termId: string;
-  termName: string;
-  totalExpected: number;
-  totalCollected: number;
-  totalOutstanding: number;
-  totalCredit: number;
-  outstandingBalances: Array<{
-    student: Student;
-    invoiceId: string;
-    amountDue: number;
-    amountPaid: number;
-    remainingBalance: number;
-    status: string;
-    credit: number;
-  }>;
-}
-
-interface School {
-  _id: string;
+interface ChargeLine {
+  id: string;
   name: string;
-  address: string;
+  amount: number | '';
 }
+
+const COMMON_CHARGE_PRESETS = [
+  'Examination Fee',
+  'Development Levy',
+  'ICT Fee',
+  'Sports Fee',
+  'Books and Educational Materials',
+  'Transportation',
+  'Uniform & Badges',
+  'PTA Levy',
+];
 
 const Fees: React.FC = () => {
-  const [students, setStudents] = useState<Student[]>([]);
-  const [sessions, setSessions] = useState<AcademicSession[]>([]);
-  const [classes, setClasses] = useState<ClassGroup[]>([]);
-  const [school, setSchool] = useState<School | null>(null);
-  const [selectedStudent, setSelectedStudent] = useState<string>('');
-  const [selectedSession, setSelectedSession] = useState<string>('');
-  const [amountDue, setAmountDue] = useState<string>('');
-  const [dueDate, setDueDate] = useState<string>('');
-  const [studentFees, setStudentFees] = useState<{ invoices: FeeInvoice[]; payments: FeePayment[] }>({
-    invoices: [],
-    payments: [],
-  });
-  const [dashboard, setDashboard] = useState<FeesDashboard | null>(null);
-  const [paymentAmount, setPaymentAmount] = useState<string>('');
+  // Navigation / Workflow steps
+  const [activeTab, setActiveTab] = useState<'billing' | 'dashboard'>('billing');
+  const [billingStep, setBillingStep] = useState<'classes' | 'create_bill' | 'invoices'>('classes');
+
+  // Selected class & invoice
+  const [selectedClass, setSelectedClass] = useState<ClassSummary | null>(null);
+  const [classInvoices, setClassInvoices] = useState<StudentInvoice[]>([]);
+  const [printingInvoice, setPrintingInvoice] = useState<any | null>(null);
+
+  // Class summaries
+  const [classes, setClasses] = useState<ClassSummary[]>([]);
+  const [activeTermInfo, setActiveTermInfo] = useState<any>(null);
+  const [hasActiveTerm, setHasActiveTerm] = useState<boolean>(true);
+
+  // Form states for creating class bill
+  const [tuition, setTuition] = useState<number | ''>(50000);
+  const [additionalCharges, setAdditionalCharges] = useState<ChargeLine[]>([
+    { id: '1', name: 'Examination Fee', amount: 5000 },
+    { id: '2', name: 'Development Levy', amount: 3000 },
+  ]);
+  const [dueDate, setDueDate] = useState<string>(
+    new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+  );
+
+  // Carryover preview data
+  const [carryoverStudents, setCarryoverStudents] = useState<CarryoverPreviewStudent[]>([]);
+  const [totalCarryoverAcrossClass, setTotalCarryoverAcrossClass] = useState<number>(0);
+  const [alreadyBilled, setAlreadyBilled] = useState<boolean>(false);
+  const [existingInvoiceCount, setExistingInvoiceCount] = useState<number>(0);
+
+  // Confirmation modal
+  const [showConfirmModal, setShowConfirmModal] = useState<boolean>(false);
+  const [generating, setGenerating] = useState<boolean>(false);
+
+  // Payment recording modal
+  const [showPaymentModal, setShowPaymentModal] = useState<boolean>(false);
+  const [paymentInvoice, setPaymentInvoice] = useState<StudentInvoice | null>(null);
+  const [paymentAmount, setPaymentAmount] = useState<number | ''>('');
   const [paymentNote, setPaymentNote] = useState<string>('');
-  const [selectedInvoiceForPayment, setSelectedInvoiceForPayment] = useState<string>('');
-  const [loading, setLoading] = useState(false);
-  const [showCreateInvoice, setShowCreateInvoice] = useState(false);
-  const [showStudentFees, setShowStudentFees] = useState(false);
-  
-  // Bill Template state
-  const [billTemplates, setBillTemplates] = useState<BillTemplate[]>([]);
-  const [showBillTemplates, setShowBillTemplates] = useState(false);
-  const [showCreateTemplate, setShowCreateTemplate] = useState(false);
-  const [templateForm, setTemplateForm] = useState({
-    name: '',
-    termId: '',
-    lineItems: [{ label: '', amount: 0 }] as BillLineItem[],
-    appliesTo: { type: 'school' as 'class' | 'school', classId: '' },
-  });
+  const [recordingPayment, setRecordingPayment] = useState<boolean>(false);
+
+  // Fees Dashboard stats
+  const [dashboardStats, setDashboardStats] = useState<any>(null);
+
+  // UI state
+  const [loading, setLoading] = useState<boolean>(true);
+  const [classSearch, setClassSearch] = useState<string>('');
+  const [studentSearch, setStudentSearch] = useState<string>('');
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchStudents();
-    fetchSessions();
-    fetchClasses();
-    fetchBillTemplates();
-    fetchSchool();
+    initFees();
   }, []);
 
-  useEffect(() => {
-    fetchDashboard();
-  }, [selectedSession]);
-
-  const fetchStudents = async () => {
-    try {
-      const response = await api.get('/students');
-      setStudents(response.data);
-    } catch (error) {
-      console.error('Failed to fetch students:', error);
-    }
-  };
-
-  const fetchSessions = async () => {
-    try {
-      const response = await api.get('/academic-sessions');
-      setSessions(response.data);
-      
-      // Try to get the school's active term
-      try {
-        const schoolResponse = await api.get('/schools/me');
-        const activeTermId = schoolResponse.data.activeTermId;
-        if (activeTermId) {
-          setSelectedSession(activeTermId.toString());
-          return;
-        }
-      } catch (error) {
-        // If fetching school fails, fall back to most recent
-      }
-      
-      // Fall back to most recent session (by createdAt)
-      const sortedSessions = [...response.data].sort((a: any, b: any) => 
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      );
-      if (sortedSessions.length > 0) {
-        setSelectedSession(sortedSessions[0]._id);
-      }
-    } catch (error) {
-      console.error('Failed to fetch sessions:', error);
-    }
-  };
-
-  const fetchClasses = async () => {
-    try {
-      const response = await api.get('/classes');
-      setClasses(response.data);
-    } catch (error) {
-      console.error('Failed to fetch classes:', error);
-    }
-  };
-
-  const fetchBillTemplates = async () => {
-    try {
-      const response = await api.get('/fees/bill-templates');
-      setBillTemplates(response.data);
-    } catch (error) {
-      console.error('Failed to fetch bill templates:', error);
-    }
-  };
-
-  const fetchSchool = async () => {
-    try {
-      const response = await api.get('/schools/me');
-      setSchool(response.data);
-    } catch (error) {
-      console.error('Failed to fetch school:', error);
-    }
-  };
-
-  const fetchDashboard = async () => {
-    try {
-      const url = selectedSession ? `/fees/dashboard?termId=${selectedSession}` : '/fees/dashboard';
-      const response = await api.get(url);
-      setDashboard(response.data);
-    } catch (error) {
-      console.error('Failed to fetch dashboard:', error);
-    }
-  };
-
-  const fetchStudentFees = async (studentId: string) => {
+  const initFees = async () => {
     try {
       setLoading(true);
-      const response = await api.get(`/fees/student/${studentId}`);
-      setStudentFees(response.data);
-      setShowStudentFees(true);
-    } catch (error) {
-      console.error('Failed to fetch student fees:', error);
+      setErrorMessage(null);
+
+      // Verify active period
+      const periodRes = await api.get('/schools/active-period');
+      if (!periodRes.data || !periodRes.data.hasActivePeriod) {
+        setHasActiveTerm(false);
+        setLoading(false);
+        return;
+      }
+      setHasActiveTerm(true);
+      setActiveTermInfo(periodRes.data);
+
+      await Promise.all([loadClassSummaries(), loadFeesDashboard()]);
+    } catch (err: any) {
+      console.error('Failed to initialize fees:', err);
+      setErrorMessage(err.response?.data?.error || 'Failed to initialize Fees module.');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleCreateInvoice = async () => {
-    if (!selectedStudent || !selectedSession || !amountDue || !dueDate) {
-      alert('Please fill all fields');
+  const loadClassSummaries = async () => {
+    try {
+      const res = await api.get('/fees/classes-summary');
+      setClasses(res.data?.classes || []);
+    } catch (err) {
+      console.error('Failed to load class billing summary:', err);
+    }
+  };
+
+  const loadFeesDashboard = async () => {
+    try {
+      const res = await api.get('/fees/dashboard');
+      setDashboardStats(res.data);
+    } catch (err) {
+      console.error('Failed to load fees dashboard stats:', err);
+    }
+  };
+
+  // Step 1: Select class -> Step 2: Open class billing
+  const handleSelectClass = async (cls: ClassSummary) => {
+    setSelectedClass(cls);
+    setSuccessMessage(null);
+    setErrorMessage(null);
+
+    try {
+      setLoading(true);
+      // Fetch carryover preview
+      const previewRes = await api.get('/fees/class-preview', {
+        params: { classId: cls._id },
+      });
+
+      const pData = previewRes.data;
+      setCarryoverStudents(pData.students || []);
+      setTotalCarryoverAcrossClass(pData.totalCarryoverAcrossClass || 0);
+      setAlreadyBilled(Boolean(pData.alreadyBilled));
+      setExistingInvoiceCount(pData.existingInvoiceCount || 0);
+
+      // If already billed, load invoices and go to invoice view
+      if (pData.alreadyBilled) {
+        await loadClassInvoices(cls._id);
+        setBillingStep('invoices');
+      } else {
+        setBillingStep('create_bill');
+      }
+    } catch (err: any) {
+      console.error('Failed to load class preview:', err);
+      setErrorMessage(err.response?.data?.error || 'Failed to inspect class billing details.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadClassInvoices = async (classId: string) => {
+    try {
+      const res = await api.get('/fees/class-invoices', {
+        params: { classId },
+      });
+      setClassInvoices(res.data?.invoices || []);
+    } catch (err) {
+      console.error('Failed to load class invoices:', err);
+    }
+  };
+
+  // Additional charges management
+  const handleAddChargeLine = (presetName: string = '') => {
+    setAdditionalCharges([
+      ...additionalCharges,
+      { id: Date.now().toString(), name: presetName, amount: 0 },
+    ]);
+  };
+
+  const handleRemoveChargeLine = (id: string) => {
+    setAdditionalCharges(additionalCharges.filter((c) => c.id !== id));
+  };
+
+  const handleChargeChange = (id: string, field: 'name' | 'amount', value: any) => {
+    setAdditionalCharges(
+      additionalCharges.map((c) => {
+        if (c.id === id) {
+          if (field === 'amount') {
+            const num = value === '' ? '' : Math.max(0, parseFloat(value) || 0);
+            return { ...c, amount: num };
+          }
+          return { ...c, [field]: value };
+        }
+        return c;
+      })
+    );
+  };
+
+  // Automatic calculation of current term charges
+  const currentTermCharges = useMemo(() => {
+    const t = typeof tuition === 'number' ? tuition : 0;
+    const addtl = additionalCharges.reduce((sum, c) => sum + (typeof c.amount === 'number' ? c.amount : 0), 0);
+    return t + addtl;
+  }, [tuition, additionalCharges]);
+
+  const totalClassExpectedAmount = useMemo(() => {
+    const studentCount = carryoverStudents.length;
+    return studentCount * currentTermCharges + totalCarryoverAcrossClass;
+  }, [carryoverStudents, currentTermCharges, totalCarryoverAcrossClass]);
+
+  // Execute class bill generation
+  const handleConfirmGenerateBill = async (overwrite: boolean = false) => {
+    if (!selectedClass) return;
+
+    if (typeof tuition !== 'number' || tuition < 0) {
+      alert('Please enter a valid tuition amount.');
       return;
     }
 
     try {
-      setLoading(true);
-      await api.post('/fees/invoices', {
-        studentId: selectedStudent,
-        termId: selectedSession,
-        amountDue: parseFloat(amountDue),
+      setGenerating(true);
+      setErrorMessage(null);
+      setSuccessMessage(null);
+
+      const payload = {
+        classId: selectedClass._id,
+        tuition,
+        additionalCharges: additionalCharges.map((c) => ({
+          name: c.name,
+          amount: Number(c.amount) || 0,
+        })),
         dueDate,
-      });
-      alert('Invoice created successfully');
-      setShowCreateInvoice(false);
-      setAmountDue('');
-      setDueDate('');
-      fetchDashboard();
-      if (selectedStudent) {
-        fetchStudentFees(selectedStudent);
+        overwrite,
+      };
+
+      const res = await api.post('/fees/generate-class-bill', payload);
+
+      setSuccessMessage(res.data.message || 'Invoices successfully generated for the entire class!');
+      setShowConfirmModal(false);
+
+      // Load generated invoices and switch to invoice view
+      await Promise.all([loadClassInvoices(selectedClass._id), loadClassSummaries(), loadFeesDashboard()]);
+      setBillingStep('invoices');
+    } catch (err: any) {
+      console.error('Generate bill error:', err);
+      if (err.response?.status === 409) {
+        if (window.confirm('A bill already exists for this class in this term. Would you like to revise/overwrite the existing invoices?')) {
+          handleConfirmGenerateBill(true);
+          return;
+        }
       }
-    } catch (error: any) {
-      console.error('Failed to create invoice:', error);
-      alert(error.response?.data?.error || 'Failed to create invoice');
+      setErrorMessage(err.response?.data?.error || 'Failed to generate class bills.');
     } finally {
-      setLoading(false);
+      setGenerating(false);
     }
+  };
+
+  // Record payment
+  const handleOpenPaymentModal = (invoice: StudentInvoice) => {
+    setPaymentInvoice(invoice);
+    setPaymentAmount(invoice.remainingBalance);
+    setPaymentNote('School fee payment');
+    setShowPaymentModal(true);
   };
 
   const handleRecordPayment = async () => {
-    if (!selectedInvoiceForPayment || !paymentAmount) {
-      alert('Please select an invoice and enter payment amount');
+    if (!paymentInvoice || typeof paymentAmount !== 'number' || paymentAmount <= 0) {
+      alert('Please enter a valid positive payment amount.');
       return;
     }
 
     try {
-      setLoading(true);
-      const response = await api.post('/fees/payments', {
-        invoiceId: selectedInvoiceForPayment,
-        amountPaid: parseFloat(paymentAmount),
+      setRecordingPayment(true);
+      await api.post('/fees/payments', {
+        invoiceId: paymentInvoice._id,
+        amountPaid: paymentAmount,
         note: paymentNote,
       });
-      
-      if (response.data.credit > 0) {
-        alert(`Payment recorded successfully. Credit balance: ₦${response.data.credit.toLocaleString()}`);
-      } else {
-        alert('Payment recorded successfully');
+
+      setShowPaymentModal(false);
+      setSuccessMessage(`Payment of ₦${paymentAmount.toLocaleString()} recorded successfully!`);
+
+      // Refresh invoices and dashboard
+      if (selectedClass) {
+        await loadClassInvoices(selectedClass._id);
+        await loadClassSummaries();
       }
-      
-      setPaymentAmount('');
-      setPaymentNote('');
-      setSelectedInvoiceForPayment('');
-      fetchDashboard();
-      if (selectedStudent) {
-        fetchStudentFees(selectedStudent);
-      }
-    } catch (error: any) {
-      console.error('Failed to record payment:', error);
-      alert(error.response?.data?.error || 'Failed to record payment');
+      await loadFeesDashboard();
+    } catch (err: any) {
+      alert(err.response?.data?.error || 'Failed to record payment.');
     } finally {
-      setLoading(false);
+      setRecordingPayment(false);
     }
   };
 
-  const getInvoiceTotalPaid = (invoiceId: string) => {
-    const payments = studentFees.payments.filter((p) => p.invoiceId === invoiceId);
-    return payments.reduce((sum, p) => sum + p.amountPaid, 0);
-  };
-
-  // Bill Template Functions
-  const handleCreateTemplate = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Open printable bill
+  const handleOpenPrintBill = async (invoiceId: string) => {
     try {
-      const validLineItems = templateForm.lineItems.filter(item => item.label && item.amount > 0);
-      if (validLineItems.length === 0) {
-        alert('Please add at least one line item with a label and amount');
-        return;
-      }
-
-      await api.post('/fees/bill-templates', {
-        ...templateForm,
-        lineItems: validLineItems,
-      });
-
-      alert('Bill template created successfully');
-      setShowCreateTemplate(false);
-      setTemplateForm({
-        name: '',
-        termId: '',
-        lineItems: [{ label: '', amount: 0 }],
-        appliesTo: { type: 'school', classId: '' },
-      });
-      fetchBillTemplates();
-    } catch (error: any) {
-      console.error('Failed to create template:', error);
-      alert(error.response?.data?.error || 'Failed to create template');
+      const res = await api.get(`/fees/invoice-detail/${invoiceId}`);
+      setPrintingInvoice(res.data);
+    } catch (err) {
+      alert('Failed to load invoice details for printing.');
     }
   };
 
-  const handleApplyTemplate = async (templateId: string) => {
-    if (!confirm('This will create invoices for all active students in the target. Continue?')) return;
-    
-    try {
-      const response = await api.post(`/fees/bill-templates/${templateId}/apply`);
-      alert(response.data.message);
-      fetchDashboard();
-    } catch (error: any) {
-      console.error('Failed to apply template:', error);
-      alert(error.response?.data?.error || 'Failed to apply template');
-    }
-  };
+  const filteredClassList = classes.filter((cls) => {
+    const q = classSearch.toLowerCase();
+    return cls.name.toLowerCase().includes(q) || cls.assignedTeachers.join(' ').toLowerCase().includes(q);
+  });
 
-  const handleDeleteTemplate = async (templateId: string) => {
-    if (!confirm('Are you sure you want to delete this bill template?')) return;
-    
-    try {
-      await api.delete(`/fees/bill-templates/${templateId}`);
-      alert('Bill template deleted successfully');
-      fetchBillTemplates();
-    } catch (error: any) {
-      console.error('Failed to delete template:', error);
-      alert(error.response?.data?.error || 'Failed to delete template');
-    }
-  };
+  const filteredInvoices = classInvoices.filter((inv) => {
+    const q = studentSearch.toLowerCase();
+    return (
+      inv.fullName.toLowerCase().includes(q) ||
+      inv.admissionNo.toLowerCase().includes(q) ||
+      inv.invoiceNumber.toLowerCase().includes(q)
+    );
+  });
 
-  const addLineItem = () => {
-    setTemplateForm({
-      ...templateForm,
-      lineItems: [...templateForm.lineItems, { label: '', amount: 0 }],
-    });
-  };
-
-  const removeLineItem = (index: number) => {
-    setTemplateForm({
-      ...templateForm,
-      lineItems: templateForm.lineItems.filter((_, i) => i !== index),
-    });
-  };
-
-  const updateLineItem = (index: number, field: 'label' | 'amount', value: string | number) => {
-    const updatedItems = [...templateForm.lineItems];
-    updatedItems[index] = { ...updatedItems[index], [field]: value };
-    setTemplateForm({ ...templateForm, lineItems: updatedItems });
-  };
-
-  const getTemplateTotal = () => {
-    return templateForm.lineItems.reduce((sum, item) => sum + (item.amount || 0), 0);
-  };
-
-  const handlePrintBill = (invoice: FeeInvoice) => {
-    // Create a printable bill view
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) {
-      alert('Please allow popups to print bills');
-      return;
-    }
-
-    const student = invoice.studentId;
-    const term = invoice.termId;
-    const template = invoice.billTemplate;
-    const totalPaid = getInvoiceTotalPaid(invoice._id);
-    const remaining = Math.max(0, invoice.amountDue - totalPaid);
-
-    let lineItemsHtml = '';
-    if (template && template.lineItems) {
-      lineItemsHtml = template.lineItems.map((item) => `
-        <tr>
-          <td style="padding: 8px; border-bottom: 1px solid #ddd;">${item.label}</td>
-          <td style="padding: 8px; border-bottom: 1px solid #ddd; text-align: right;">₦${item.amount.toLocaleString()}</td>
-        </tr>
-      `).join('');
-    } else {
-      lineItemsHtml = `
-        <tr>
-          <td style="padding: 8px; border-bottom: 1px solid #ddd;">Fees</td>
-          <td style="padding: 8px; border-bottom: 1px solid #ddd; text-align: right;">₦${invoice.amountDue.toLocaleString()}</td>
-        </tr>
-      `;
-    }
-
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Fee Bill - ${student.fullName}</title>
-        <style>
-          body { font-family: Arial, sans-serif; padding: 40px; }
-          .header { text-align: center; margin-bottom: 30px; }
-          .header h1 { margin: 0; color: #1f2937; }
-          .header p { margin: 5px 0; color: #6b7280; }
-          .student-info { margin-bottom: 30px; }
-          .student-info table { width: 100%; border-collapse: collapse; }
-          .student-info td { padding: 8px; border-bottom: 1px solid #e5e7eb; }
-          .student-info td:first-child { font-weight: bold; width: 150px; }
-          .line-items { margin-bottom: 30px; }
-          .line-items table { width: 100%; border-collapse: collapse; }
-          .line-items th { background: #f3f4f6; padding: 10px; text-align: left; border-bottom: 2px solid #d1d5db; }
-          .totals { margin-top: 20px; text-align: right; }
-          .totals p { margin: 5px 0; font-size: 18px; }
-          .totals .amount { font-weight: bold; }
-          .footer { margin-top: 40px; text-align: center; color: #6b7280; font-size: 12px; }
-          @media print { body { padding: 20px; } }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <h1>${school?.name || 'Fee Bill'}</h1>
-          <p>Fee Bill</p>
+  if (!loading && !hasActiveTerm) {
+    return (
+      <div className="max-w-4xl mx-auto py-12 px-4">
+        <div className="bg-amber-50 border-l-4 border-amber-500 p-6 rounded-r-lg shadow-sm">
+          <div className="flex items-start">
+            <ShieldAlert className="h-7 w-7 text-amber-500 mr-4 flex-shrink-0 mt-0.5" />
+            <div>
+              <h2 className="text-lg font-bold text-amber-900">Active Academic Session Required</h2>
+              <p className="mt-2 text-sm text-amber-800 leading-relaxed">
+                Bill Generation requires an active academic session and term to be configured centrally in Settings.
+                All fee invoices and payments must be associated with the school's active period.
+              </p>
+              <div className="mt-4">
+                <a
+                  href="/settings"
+                  className="inline-flex items-center px-4 py-2 text-sm font-semibold rounded-md shadow-xs text-white bg-amber-600 hover:bg-amber-700"
+                >
+                  Go to Settings →
+                </a>
+              </div>
+            </div>
+          </div>
         </div>
-
-        <div class="student-info">
-          <table>
-            <tr>
-              <td>Student Name:</td>
-              <td>${student.fullName}</td>
-            </tr>
-            <tr>
-              <td>Admission No:</td>
-              <td>${student.admissionNo}</td>
-            </tr>
-            <tr>
-              <td>Term:</td>
-              <td>${term.year} - ${term.currentTerm}</td>
-            </tr>
-            <tr>
-              <td>Invoice Date:</td>
-              <td>${new Date(invoice.createdAt).toLocaleDateString()}</td>
-            </tr>
-            <tr>
-              <td>Due Date:</td>
-              <td>${new Date(invoice.dueDate).toLocaleDateString()}</td>
-            </tr>
-          </table>
-        </div>
-
-        <div class="line-items">
-          <h3>Fee Breakdown</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>Description</th>
-                <th style="text-align: right;">Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${lineItemsHtml}
-            </tbody>
-          </table>
-        </div>
-
-        <div class="totals">
-          <p>Total Due: <span class="amount">₦${invoice.amountDue.toLocaleString()}</span></p>
-          <p>Amount Paid: <span class="amount">₦${totalPaid.toLocaleString()}</span></p>
-          <p>Outstanding Balance: <span class="amount ${remaining > 0 ? 'text-red-600' : 'text-green-600'}">₦${remaining.toLocaleString()}</span></p>
-          ${(invoice.credit || 0) > 0 ? `<p>Credit Balance: <span class="amount">₦${invoice.credit.toLocaleString()}</span></p>` : ''}
-        </div>
-
-        <div class="footer">
-          <p>Generated on ${new Date().toLocaleString()}</p>
-        </div>
-      </body>
-      </html>
-    `);
-
-    printWindow.document.close();
-    printWindow.focus();
-    printWindow.print();
-  };
+      </div>
+    );
+  }
 
   return (
-    <div>
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Fees</h1>
-        <div className="flex space-x-3">
-          <button
-            onClick={() => setShowBillTemplates(!showBillTemplates)}
-            className="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700"
-          >
-            {showBillTemplates ? 'View Dashboard' : 'Bill Templates'}
-          </button>
-          <button
-            onClick={() => setShowCreateInvoice(!showCreateInvoice)}
-            className="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700"
-          >
-            {showCreateInvoice ? 'View Dashboard' : 'Create Invoice'}
-          </button>
+    <div className="space-y-6">
+      {/* Top Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-gray-200 pb-4 print:hidden">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Fees & Class Billing</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            Automated class billing with carryover balance calculation and invoice printing.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-3">
+          {activeTermInfo && (
+            <div className="inline-flex items-center space-x-2 bg-indigo-50 border border-indigo-200 text-indigo-700 px-3.5 py-1.5 rounded-full text-xs font-semibold shadow-xs">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span>
+                Active Period: {activeTermInfo.session?.year || 'Current'} · Term {activeTermInfo.session?.currentTerm || 'Term'}
+              </span>
+            </div>
+          )}
+
+          <div className="inline-flex rounded-lg border border-gray-300 p-0.5 bg-gray-50">
+            <button
+              onClick={() => setActiveTab('billing')}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
+                activeTab === 'billing' ? 'bg-white text-indigo-700 shadow-2xs' : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              Class Billing
+            </button>
+            <button
+              onClick={() => setActiveTab('dashboard')}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
+                activeTab === 'dashboard' ? 'bg-white text-indigo-700 shadow-2xs' : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              Fees Dashboard
+            </button>
+          </div>
         </div>
       </div>
 
-      {showBillTemplates ? (
-        <div className="bg-white rounded-lg shadow p-6">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-xl font-semibold text-gray-900">Bill Templates</h2>
-            <button
-              onClick={() => {
-                setTemplateForm({
-                  name: '',
-                  termId: selectedSession || '',
-                  lineItems: [{ label: '', amount: 0 }],
-                  appliesTo: { type: 'school', classId: '' },
-                });
-                setShowCreateTemplate(true);
-              }}
-              className="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700"
-            >
-              Create Template
-            </button>
-          </div>
+      {successMessage && (
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-4 rounded-lg flex items-center print:hidden shadow-xs">
+          <CheckCircle className="h-5 w-5 text-emerald-500 mr-3 flex-shrink-0" />
+          <span className="text-sm font-medium">{successMessage}</span>
+        </div>
+      )}
+      {errorMessage && (
+        <div className="bg-rose-50 border border-rose-200 text-rose-800 p-4 rounded-lg flex items-center print:hidden shadow-xs">
+          <AlertCircle className="h-5 w-5 text-rose-500 mr-3 flex-shrink-0" />
+          <span className="text-sm font-medium">{errorMessage}</span>
+        </div>
+      )}
 
-          {showCreateTemplate ? (
-            <form onSubmit={handleCreateTemplate} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Template Name</label>
+      {/* ========================================================================= */}
+      {/* TAB 1: CLASS BILLING WORKFLOW */}
+      {/* ========================================================================= */}
+      {activeTab === 'billing' && (
+        <>
+          {/* STEP 1: SELECT CLASS */}
+          {billingStep === 'classes' && (
+            <div className="space-y-5 print:hidden">
+              <div className="relative max-w-md">
+                <Search className="h-4 w-4 text-gray-400 absolute left-3.5 top-3" />
                 <input
                   type="text"
-                  required
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                  value={templateForm.name}
-                  onChange={(e) => setTemplateForm({ ...templateForm, name: e.target.value })}
-                  placeholder="e.g., First Term Fees"
+                  placeholder="Search class or assigned teacher..."
+                  value={classSearch}
+                  onChange={(e) => setClassSearch(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
                 />
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Term</label>
-                <select
-                  required
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                  value={templateForm.termId}
-                  onChange={(e) => setTemplateForm({ ...templateForm, termId: e.target.value })}
-                >
-                  <option value="">Select a term...</option>
-                  {sessions.map((session) => (
-                    <option key={session._id} value={session._id}>
-                      {session.year} - {session.currentTerm}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Applies To</label>
-                <select
-                  required
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                  value={templateForm.appliesTo.type}
-                  onChange={(e) => setTemplateForm({
-                    ...templateForm,
-                    appliesTo: { type: e.target.value as 'class' | 'school', classId: '' },
-                  })}
-                >
-                  <option value="school">Whole School</option>
-                  <option value="class">Specific Class</option>
-                </select>
-              </div>
-
-              {templateForm.appliesTo.type === 'class' && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Class</label>
-                  <select
-                    required
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                    value={templateForm.appliesTo.classId}
-                    onChange={(e) => setTemplateForm({
-                      ...templateForm,
-                      appliesTo: { ...templateForm.appliesTo, classId: e.target.value },
-                    })}
-                  >
-                    <option value="">Select a class...</option>
-                    {classes.map((cls) => (
-                      <option key={cls._id} value={cls._id}>
-                        {cls.name} - {cls.arm}
-                      </option>
-                    ))}
-                  </select>
+              {loading ? (
+                <div className="p-12 text-center text-gray-500">
+                  <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mb-2"></div>
+                  <p>Loading school classes & billing statuses...</p>
                 </div>
-              )}
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Line Items</label>
-                {templateForm.lineItems.map((item, index) => (
-                  <div key={index} className="flex space-x-2 mb-2">
-                    <input
-                      type="text"
-                      required
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                      placeholder="Label (e.g., Tuition)"
-                      value={item.label}
-                      onChange={(e) => updateLineItem(index, 'label', e.target.value)}
-                    />
-                    <input
-                      type="number"
-                      required
-                      min="0"
-                      step="0.01"
-                      className="w-32 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                      placeholder="Amount"
-                      value={item.amount}
-                      onChange={(e) => updateLineItem(index, 'amount', parseFloat(e.target.value) || 0)}
-                    />
-                    {templateForm.lineItems.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => removeLineItem(index)}
-                        className="px-3 py-2 bg-red-500 text-white rounded-md hover:bg-red-600"
-                      >
-                        Remove
-                      </button>
-                    )}
-                  </div>
-                ))}
-                <button
-                  type="button"
-                  onClick={addLineItem}
-                  className="mt-2 text-indigo-600 hover:text-indigo-700 font-medium"
-                >
-                  + Add Line Item
-                </button>
-              </div>
-
-              <div className="bg-gray-50 p-4 rounded-md">
-                <p className="text-sm font-medium text-gray-700">
-                  Total: ₦{getTemplateTotal().toLocaleString()}
-                </p>
-              </div>
-
-              <div className="flex justify-end space-x-3">
-                <button
-                  type="button"
-                  onClick={() => setShowCreateTemplate(false)}
-                  className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
-                >
-                  Create Template
-                </button>
-              </div>
-            </form>
-          ) : (
-            <div className="space-y-4">
-              {billTemplates.length === 0 ? (
-                <p className="text-gray-500 text-center py-8">No bill templates found. Create one to get started.</p>
+              ) : filteredClassList.length === 0 ? (
+                <div className="p-12 text-center bg-white rounded-lg border border-gray-200 text-gray-500">
+                  <Building className="h-10 w-10 text-gray-400 mx-auto mb-2" />
+                  <p className="font-semibold text-gray-700">No classes found</p>
+                </div>
               ) : (
-                billTemplates.map((template) => (
-                  <div key={template._id} className="border border-gray-200 rounded-lg p-4">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <h3 className="font-semibold text-gray-900">{template.name}</h3>
-                        <p className="text-sm text-gray-500">
-                          {template.term?.year} - {template.term?.currentTerm}
-                        </p>
-                        <p className="text-sm text-gray-500">
-                          {template.appliesTo?.type === 'class'
-                            ? `Class: ${template.appliesToClass?.name} - ${template.appliesToClass?.arm}`
-                            : 'Whole School'}
-                        </p>
-                        <p className="text-sm font-medium text-gray-900 mt-2">
-                          Total: ₦{template.totalAmount.toLocaleString()}
-                        </p>
-                        <div className="text-sm text-gray-600 mt-1">
-                          {template.lineItems.map((item, i) => (
-                            <span key={i}>
-                              {item.label}: ₦{item.amount.toLocaleString()}
-                              {i < template.lineItems.length - 1 ? ', ' : ''}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                  {filteredClassList.map((cls) => {
+                    return (
+                      <div
+                        key={cls._id}
+                        onClick={() => handleSelectClass(cls)}
+                        className="bg-white rounded-xl border border-gray-200 p-5 hover:border-indigo-400 hover:shadow-md cursor-pointer transition-all flex flex-col justify-between group shadow-xs"
+                      >
+                        <div>
+                          <div className="flex items-start justify-between">
+                            <div className="h-10 w-10 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-sm">
+                              {cls.arm || 'C'}
+                            </div>
+                            <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-gray-100 text-gray-700">
+                              {cls.studentCount} Students
                             </span>
-                          ))}
+                          </div>
+
+                          <h3 className="text-lg font-bold text-gray-900 mt-3 group-hover:text-indigo-600 transition-colors">
+                            {cls.name}
+                          </h3>
+
+                          <p className="text-xs text-gray-500 mt-1">
+                            Teacher:{' '}
+                            <span className="text-gray-700 font-medium">
+                              {cls.assignedTeachers?.length ? cls.assignedTeachers.join(', ') : 'Unassigned'}
+                            </span>
+                          </p>
                         </div>
-                      </div>
-                      <div className="flex space-x-2">
-                        <button
-                          onClick={() => handleApplyTemplate(template._id)}
-                          className="px-3 py-1 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm"
-                        >
-                          Apply
-                        </button>
-                        <button
-                          onClick={() => handleDeleteTemplate(template._id)}
-                          className="px-3 py-1 bg-red-600 text-white rounded-md hover:bg-red-700 text-sm"
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          )}
-        </div>
-      ) : showCreateInvoice ? (
-        <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4">Create Invoice</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Student</label>
-              <select
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                value={selectedStudent}
-                onChange={(e) => setSelectedStudent(e.target.value)}
-              >
-                <option value="">Select a student...</option>
-                {students.map((student) => (
-                  <option key={student._id} value={student._id}>
-                    {student.fullName} ({student.admissionNo})
-                  </option>
-                ))}
-              </select>
-            </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Term</label>
-              <select
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                value={selectedSession}
-                onChange={(e) => setSelectedSession(e.target.value)}
-              >
-                <option value="">Select a term...</option>
-                {sessions.map((session) => (
-                  <option key={session._id} value={session._id}>
-                    {session.year} - {session.currentTerm}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Amount Due</label>
-              <input
-                type="number"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                value={amountDue}
-                onChange={(e) => setAmountDue(e.target.value)}
-                placeholder="0.00"
-                min="0"
-                step="0.01"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Due Date</label>
-              <input
-                type="date"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                value={dueDate}
-                onChange={(e) => setDueDate(e.target.value)}
-              />
-            </div>
-          </div>
-
-          <button
-            onClick={handleCreateInvoice}
-            disabled={loading}
-            className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50"
-          >
-            {loading ? 'Creating...' : 'Create Invoice'}
-          </button>
-        </div>
-      ) : (
-        <>
-          {dashboard && (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <h3 className="text-lg font-semibold text-blue-800">Total Expected</h3>
-                <p className="text-3xl font-bold text-blue-900">
-                  ₦{dashboard.totalExpected.toLocaleString()}
-                </p>
-                <p className="text-sm text-blue-600 mt-1">{dashboard.termName}</p>
-                <div className="mt-2">
-                  <select
-                    className="text-xs px-2 py-1 border border-blue-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    value={selectedSession}
-                    onChange={(e) => setSelectedSession(e.target.value)}
-                  >
-                    {sessions.map((session) => (
-                      <option key={session._id} value={session._id}>
-                        {session.year} - {session.currentTerm}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                <h3 className="text-lg font-semibold text-green-800">Total Collected</h3>
-                <p className="text-3xl font-bold text-green-900">
-                  ₦{dashboard.totalCollected.toLocaleString()}
-                </p>
-              </div>
-              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                <h3 className="text-lg font-semibold text-red-800">Outstanding</h3>
-                <p className="text-3xl font-bold text-red-900">
-                  ₦{dashboard.totalOutstanding.toLocaleString()}
-                </p>
-              </div>
-              <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
-                <h3 className="text-lg font-semibold text-purple-800">Total Credit</h3>
-                <p className="text-3xl font-bold text-purple-900">
-                  ₦{dashboard.totalCredit?.toLocaleString() || 0}
-                </p>
-              </div>
-            </div>
-          )}
-
-          {dashboard && dashboard.outstandingBalances.length > 0 && (
-            <div className="bg-white rounded-lg shadow p-6 mb-6">
-              <h2 className="text-xl font-semibold text-gray-900 mb-4">Outstanding Balances</h2>
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                        Student
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                        Amount Due
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                        Paid
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                        Remaining
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                        Status
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {dashboard.outstandingBalances.map((balance) => (
-                      <tr key={balance.invoiceId}>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {balance.student.fullName}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          ₦{balance.amountDue.toLocaleString()}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          ₦{balance.amountPaid.toLocaleString()}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-red-600 font-medium">
-                          ₦{balance.remainingBalance.toLocaleString()}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm">
-                          <span
-                            className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                              balance.status === 'paid'
-                                ? 'bg-green-100 text-green-800'
-                                : balance.status === 'partial'
-                                ? 'bg-yellow-100 text-yellow-800'
-                                : 'bg-red-100 text-red-800'
-                            }`}
-                          >
-                            {balance.status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-xl font-semibold text-gray-900 mb-4">View Student Fees</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Student</label>
-                <select
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                  value={selectedStudent}
-                  onChange={(e) => setSelectedStudent(e.target.value)}
-                >
-                  <option value="">Select a student...</option>
-                  {students.map((student) => (
-                    <option key={student._id} value={student._id}>
-                      {student.fullName} ({student.admissionNo})
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex items-end">
-                <button
-                  onClick={() => selectedStudent && fetchStudentFees(selectedStudent)}
-                  disabled={loading || !selectedStudent}
-                  className="w-full px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50"
-                >
-                  {loading ? 'Loading...' : 'View Fees'}
-                </button>
-              </div>
-            </div>
-
-            {showStudentFees && (
-              <>
-                <div className="mb-6">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-3">Invoices</h3>
-                  {studentFees.invoices.length === 0 ? (
-                    <p className="text-gray-500">No invoices found for this student.</p>
-                  ) : (
-                    <div className="space-y-3">
-                      {studentFees.invoices.map((invoice) => {
-                        const totalPaid = getInvoiceTotalPaid(invoice._id);
-                        const remaining = Math.max(0, invoice.amountDue - totalPaid);
-                        const hasCredit = (invoice.credit || 0) > 0;
-                        return (
-                          <div key={invoice._id} className="border border-gray-200 rounded-lg p-4">
-                            <div className="flex justify-between items-start mb-2">
-                              <div>
-                                <p className="font-medium text-gray-900">
-                                  {invoice.termId.year} - {invoice.termId.currentTerm}
-                                </p>
-                                <p className="text-sm text-gray-500">
-                                  Due: {new Date(invoice.dueDate).toLocaleDateString()}
-                                </p>
-                              </div>
-                              <span
-                                className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                                  invoice.status === 'paid'
-                                    ? 'bg-green-100 text-green-800'
-                                    : invoice.status === 'partial'
-                                    ? 'bg-yellow-100 text-yellow-800'
-                                    : 'bg-red-100 text-red-800'
-                                }`}
-                              >
-                                {invoice.status}
+                        <div className="mt-5 pt-4 border-t border-gray-100 space-y-2 text-xs">
+                          <div className="flex justify-between items-center text-gray-600">
+                            <span>Billing Status:</span>
+                            {cls.billingStatus === 'billed' ? (
+                              <span className="inline-flex items-center text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded">
+                                <CheckCircle className="h-3 w-3 mr-1 text-emerald-600" /> Billed ({cls.invoicesCount})
                               </span>
-                            </div>
-                            <div className="grid grid-cols-3 gap-4 text-sm">
-                              <div>
-                                <p className="text-gray-500">Amount Due</p>
-                                <p className="font-medium text-gray-900">
-                                  ₦{invoice.amountDue.toLocaleString()}
-                                </p>
-                              </div>
-                              <div>
-                                <p className="text-gray-500">Paid</p>
-                                <p className="font-medium text-green-600">
-                                  ₦{totalPaid.toLocaleString()}
-                                </p>
-                              </div>
-                              <div>
-                                <p className="text-gray-500">Remaining</p>
-                                <p className={`font-medium ${remaining > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                                  ₦{remaining.toLocaleString()}
-                                </p>
-                              </div>
-                            </div>
-                            {hasCredit && (
-                              <div className="mt-2 bg-blue-50 border border-blue-200 rounded-lg p-2">
-                                <p className="text-sm text-blue-800">
-                                  Credit balance: ₦{(invoice.credit || 0).toLocaleString()}
-                                </p>
-                              </div>
-                            )}
-                            <div className="mt-3 pt-3 border-t border-gray-200 flex justify-between">
-                              <button
-                                onClick={() => {
-                                  setSelectedInvoiceForPayment(invoice._id);
-                                  handlePrintBill(invoice);
-                                }}
-                                className="px-3 py-1 bg-gray-600 text-white rounded-md hover:bg-gray-700 text-sm"
-                              >
-                                Print Bill
-                              </button>
-                              {remaining > 0 && (
-                                <button
-                                  onClick={() => {
-                                    setSelectedInvoiceForPayment(invoice._id);
-                                    handleRecordPayment();
-                                  }}
-                                  disabled={loading}
-                                  className="px-3 py-1 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm disabled:opacity-50"
-                                >
-                                  {loading ? 'Recording...' : 'Record Payment'}
-                                </button>
-                              )}
-                            </div>
-                            {remaining > 0 && selectedInvoiceForPayment === invoice._id && (
-                              <div className="mt-3 pt-3 border-t border-gray-200">
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
-                                  Record Payment
-                                </label>
-                                <div className="flex space-x-2">
-                                  <input
-                                    type="number"
-                                    className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                                    placeholder="Amount"
-                                    value={paymentAmount}
-                                    onChange={(e) => setPaymentAmount(e.target.value)}
-                                    min="0"
-                                    step="0.01"
-                                  />
-                                  <input
-                                    type="text"
-                                    className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                                    placeholder="Note (optional)"
-                                    value={paymentNote}
-                                    onChange={(e) => setPaymentNote(e.target.value)}
-                                  />
-                                  <button
-                                    onClick={handleRecordPayment}
-                                    disabled={
-                                      loading ||
-                                      !paymentAmount ||
-                                      selectedInvoiceForPayment !== invoice._id
-                                    }
-                                    className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50"
-                                  >
-                                    Record
-                                  </button>
-                                </div>
-                              </div>
-                            )}
-                            {hasCredit && !remaining && (
-                              <div className="mt-2 bg-blue-50 border border-blue-200 rounded-lg p-2">
-                                <p className="text-sm text-blue-800">
-                                  Additional payments will add to credit balance
-                                </p>
-                              </div>
+                            ) : cls.billingStatus === 'partial' ? (
+                              <span className="inline-flex items-center text-amber-700 font-bold bg-amber-50 px-2 py-0.5 rounded">
+                                <Clock className="h-3 w-3 mr-1 text-amber-600" /> Partial ({cls.invoicesCount}/{cls.studentCount})
+                              </span>
+                            ) : (
+                              <span className="text-gray-500 font-medium bg-gray-100 px-2 py-0.5 rounded">
+                                Not Billed
+                              </span>
                             )}
                           </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
 
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-3">Payment History</h3>
-                  {studentFees.payments.length === 0 ? (
-                    <p className="text-gray-500">No payments recorded for this student.</p>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <table className="min-w-full divide-y divide-gray-200">
-                        <thead className="bg-gray-50">
+                          {cls.totalAmountDue > 0 && (
+                            <div className="flex justify-between items-center text-gray-600">
+                              <span>Total Expected:</span>
+                              <strong className="text-gray-900 font-mono">₦{cls.totalAmountDue.toLocaleString()}</strong>
+                            </div>
+                          )}
+
+                          <div className="pt-2 flex items-center justify-between text-indigo-600 font-semibold">
+                            <span>{cls.billingStatus === 'billed' ? 'View Invoices' : 'Create Term Bill'}</span>
+                            <ChevronRight className="h-4 w-4 group-hover:translate-x-1 transition-transform" />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* STEP 2: CREATE / CONFIGURE CLASS BILL */}
+          {billingStep === 'create_bill' && selectedClass && (
+            <div className="space-y-6 print:hidden">
+              <div className="flex items-center justify-between bg-white p-4 rounded-lg border border-gray-200 shadow-xs">
+                <button
+                  onClick={() => {
+                    setBillingStep('classes');
+                    setSelectedClass(null);
+                  }}
+                  className="inline-flex items-center text-xs font-semibold text-gray-600 hover:text-indigo-600"
+                >
+                  <ArrowLeft className="h-3.5 w-3.5 mr-1" />
+                  Back to Classes
+                </button>
+
+                <span className="text-xs text-gray-500">
+                  Creating Bill for Class: <strong className="text-gray-800">{selectedClass.name}</strong> ({carryoverStudents.length} Students)
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Form Inputs (Left 2 cols) */}
+                <div className="lg:col-span-2 space-y-6">
+                  {/* Default Charge: Tuition */}
+                  <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-xs space-y-4">
+                    <div className="border-b pb-3">
+                      <h3 className="text-base font-bold text-gray-900">Default Charge: Tuition</h3>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        Tuition is automatically included for every student in this class.
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
+                        Tuition Amount (₦)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={tuition}
+                        onChange={(e) => setTuition(e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value)))}
+                        className="w-full p-2.5 text-base font-bold text-gray-900 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                        placeholder="50000"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Additional Charges */}
+                  <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-xs space-y-4">
+                    <div className="flex items-center justify-between border-b pb-3">
+                      <div>
+                        <h3 className="text-base font-bold text-gray-900">Additional Charges</h3>
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          Add levies, exam fees, sports, ICT, or textbooks for the class.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleAddChargeLine()}
+                        className="inline-flex items-center px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                      >
+                        <Plus className="h-3.5 w-3.5 mr-1" /> Add Charge Line
+                      </button>
+                    </div>
+
+                    {/* Presets */}
+                    <div>
+                      <span className="text-xs text-gray-500 font-medium block mb-2">Quick Add Common Presets:</span>
+                      <div className="flex flex-wrap gap-2">
+                        {COMMON_CHARGE_PRESETS.map((preset) => (
+                          <button
+                            key={preset}
+                            type="button"
+                            onClick={() => handleAddChargeLine(preset)}
+                            className="px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-full text-xs font-medium cursor-pointer"
+                          >
+                            + {preset}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Charges list */}
+                    {additionalCharges.length === 0 ? (
+                      <p className="text-xs text-gray-400 italic py-2">No additional charges added.</p>
+                    ) : (
+                      <div className="space-y-3">
+                        {additionalCharges.map((c) => (
+                          <div key={c.id} className="flex items-center gap-3">
+                            <input
+                              type="text"
+                              value={c.name}
+                              placeholder="Description / Service Name"
+                              onChange={(e) => handleChargeChange(c.id, 'name', e.target.value)}
+                              className="flex-1 p-2 text-xs border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500"
+                            />
+                            <div className="relative w-36">
+                              <span className="absolute left-2.5 top-2 text-xs text-gray-400">₦</span>
+                              <input
+                                type="number"
+                                min="0"
+                                value={c.amount}
+                                placeholder="0"
+                                onChange={(e) => handleChargeChange(c.id, 'amount', e.target.value)}
+                                className="w-full pl-6 pr-2 py-2 text-xs font-bold border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500"
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveChargeLine(c.id)}
+                              className="p-2 text-rose-500 hover:bg-rose-50 rounded-md"
+                              title="Remove item"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="pt-3 border-t">
+                      <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Due Date</label>
+                      <input
+                        type="date"
+                        value={dueDate}
+                        onChange={(e) => setDueDate(e.target.value)}
+                        className="p-2 text-xs border border-gray-300 rounded-md"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Carryover Breakdown Accordion */}
+                  <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-xs space-y-4">
+                    <div className="flex items-center justify-between border-b pb-3">
+                      <div>
+                        <h3 className="text-base font-bold text-gray-900">
+                          Automated Previous-Term Carryover
+                        </h3>
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          Unpaid debts from previous terms are automatically rolled over without duplication.
+                        </p>
+                      </div>
+                      <span className="text-xs font-bold text-indigo-700 bg-indigo-50 px-3 py-1 rounded-full">
+                        Total Carryover: ₦{totalCarryoverAcrossClass.toLocaleString()}
+                      </span>
+                    </div>
+
+                    <div className="max-h-60 overflow-y-auto rounded-lg border border-gray-200">
+                      <table className="min-w-full divide-y divide-gray-200 text-xs">
+                        <thead className="bg-gray-50 text-gray-500 uppercase sticky top-0">
                           <tr>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                              Date
-                            </th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                              Amount
-                            </th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                              Recorded By
-                            </th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                              Note
-                            </th>
+                            <th className="px-3 py-2 text-left">Student</th>
+                            <th className="px-3 py-2 text-left">Admission No</th>
+                            <th className="px-3 py-2 text-right">Previous Unpaid Debt</th>
                           </tr>
                         </thead>
-                        <tbody className="bg-white divide-y divide-gray-200">
-                          {studentFees.payments.map((payment) => (
-                            <tr key={payment._id}>
-                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                {new Date(payment.paidAt).toLocaleDateString()}
-                              </td>
-                              <td className="px-6 py-4 whitespace-nowrap text-sm text-green-600 font-medium">
-                                ₦{payment.amountPaid.toLocaleString()}
-                              </td>
-                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                {payment.recordedBy?.fullName || 'Unknown'}
-                              </td>
-                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                {payment.note || '-'}
+                        <tbody className="divide-y divide-gray-100">
+                          {carryoverStudents.map((s) => (
+                            <tr key={s.studentId} className={s.previousTermCarryover > 0 ? 'bg-amber-50/50' : ''}>
+                              <td className="px-3 py-2 font-medium text-gray-900">{s.fullName}</td>
+                              <td className="px-3 py-2 font-mono text-gray-500">{s.admissionNo}</td>
+                              <td className={`px-3 py-2 text-right font-bold ${s.previousTermCarryover > 0 ? 'text-rose-600' : 'text-gray-400'}`}>
+                                ₦{s.previousTermCarryover.toLocaleString()}
                               </td>
                             </tr>
                           ))}
                         </tbody>
                       </table>
                     </div>
-                  )}
+                  </div>
                 </div>
 
-                {/* Overall Credit Balance */}
-                {studentFees.invoices.length > 0 && (
-                  <div className="mt-6">
-                    {(() => {
-                      const totalCredit = studentFees.invoices.reduce((sum, inv) => sum + (inv.credit || 0), 0);
-                      if (totalCredit > 0) {
-                        return (
-                          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                            <p className="text-sm text-blue-800">
-                              Total credit balance: ₦{totalCredit.toLocaleString()}
-                            </p>
-                          </div>
-                        );
-                      }
-                      return null;
-                    })()}
+                {/* Right Summary Card (1 col) */}
+                <div className="space-y-6">
+                  <div className="bg-gradient-to-br from-indigo-900 to-indigo-950 text-white p-6 rounded-2xl shadow-xl space-y-5 sticky top-6">
+                    <h3 className="text-base font-bold tracking-wide uppercase border-b border-indigo-700 pb-3">
+                      Class Bill Summary
+                    </h3>
+
+                    <div className="space-y-3 text-xs">
+                      <div className="flex justify-between">
+                        <span className="text-indigo-200">Class:</span>
+                        <strong className="text-white">{selectedClass.name}</strong>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-indigo-200">Eligible Students:</span>
+                        <strong className="text-white">{carryoverStudents.length}</strong>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-indigo-200">Tuition per Student:</span>
+                        <strong className="text-white">₦{Number(tuition || 0).toLocaleString()}</strong>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-indigo-200">Additional Charges:</span>
+                        <strong className="text-white">
+                          ₦{(currentTermCharges - Number(tuition || 0)).toLocaleString()}
+                        </strong>
+                      </div>
+                      <div className="flex justify-between border-t border-indigo-800 pt-2 font-semibold">
+                        <span className="text-indigo-200">Current Term Charge:</span>
+                        <strong className="text-amber-300 text-sm">₦{currentTermCharges.toLocaleString()}</strong>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-indigo-200">Total Carryover Debt:</span>
+                        <strong className="text-rose-300">₦{totalCarryoverAcrossClass.toLocaleString()}</strong>
+                      </div>
+                      <div className="flex justify-between border-t border-indigo-700 pt-3">
+                        <span className="text-sm font-bold text-white">Total Expected:</span>
+                        <strong className="text-lg font-bold text-emerald-400">
+                          ₦{totalClassExpectedAmount.toLocaleString()}
+                        </strong>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmModal(true)}
+                      className="w-full py-3 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold rounded-xl shadow-lg transition-all cursor-pointer text-center"
+                    >
+                      Confirm & Generate Class Invoices
+                    </button>
                   </div>
-                )}
-              </>
-            )}
-          </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* STEP 3: CLASS INVOICES LIST */}
+          {billingStep === 'invoices' && selectedClass && (
+            <div className="space-y-5 print:hidden">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white p-4 rounded-lg border border-gray-200 shadow-xs">
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => {
+                      setBillingStep('classes');
+                      setSelectedClass(null);
+                    }}
+                    className="inline-flex items-center text-xs font-semibold text-gray-600 hover:text-indigo-600"
+                  >
+                    <ArrowLeft className="h-3.5 w-3.5 mr-1" />
+                    Back to Classes
+                  </button>
+                  <span className="text-gray-300">|</span>
+                  <span className="text-xs text-gray-500">
+                    Invoices for <strong className="text-gray-800">{selectedClass.name}</strong> ({classInvoices.length} invoices)
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setBillingStep('create_bill')}
+                    className="inline-flex items-center px-3 py-1.5 border border-gray-300 hover:bg-gray-50 text-gray-700 text-xs font-semibold rounded-lg shadow-2xs"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5 mr-1" />
+                    Revise / Re-create Bill
+                  </button>
+                </div>
+              </div>
+
+              <div className="relative max-w-md">
+                <Search className="h-4 w-4 text-gray-400 absolute left-3.5 top-3" />
+                <input
+                  type="text"
+                  placeholder="Search invoice by student or invoice #..."
+                  value={studentSearch}
+                  onChange={(e) => setStudentSearch(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              {filteredInvoices.length === 0 ? (
+                <div className="p-12 text-center bg-white rounded-lg border border-gray-200 text-gray-500">
+                  <FileText className="h-10 w-10 text-gray-400 mx-auto mb-2" />
+                  <p className="font-semibold text-gray-700">No invoices found</p>
+                </div>
+              ) : (
+                <div className="bg-white rounded-lg border border-gray-200 shadow-xs overflow-hidden">
+                  <table className="min-w-full divide-y divide-gray-200 text-xs">
+                    <thead className="bg-gray-50 font-semibold text-gray-500 uppercase tracking-wider">
+                      <tr>
+                        <th className="px-4 py-3 text-left">Invoice #</th>
+                        <th className="px-4 py-3 text-left">Student Name</th>
+                        <th className="px-4 py-3 text-left">Admission No</th>
+                        <th className="px-4 py-3 text-right">Current Charges</th>
+                        <th className="px-4 py-3 text-right">Carryover</th>
+                        <th className="px-4 py-3 text-right">Total Payable</th>
+                        <th className="px-4 py-3 text-right">Paid</th>
+                        <th className="px-4 py-3 text-right">Balance</th>
+                        <th className="px-4 py-3 text-center">Status</th>
+                        <th className="px-4 py-3 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200">
+                      {filteredInvoices.map((inv) => (
+                        <tr key={inv._id} className="hover:bg-indigo-50/40 transition-colors">
+                          <td className="px-4 py-3 whitespace-nowrap font-mono font-semibold text-indigo-700">
+                            {inv.invoiceNumber}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap font-medium text-gray-900">
+                            {inv.fullName}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap font-mono text-gray-500">
+                            {inv.admissionNo}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap text-right font-medium text-gray-700">
+                            ₦{inv.currentTermCharges.toLocaleString()}
+                          </td>
+                          <td className={`px-4 py-3 whitespace-nowrap text-right font-medium ${inv.previousTermCarryover > 0 ? 'text-rose-600' : 'text-gray-400'}`}>
+                            ₦{inv.previousTermCarryover.toLocaleString()}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap text-right font-bold text-gray-900">
+                            ₦{inv.amountDue.toLocaleString()}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap text-right font-semibold text-emerald-700">
+                            ₦{inv.amountPaid.toLocaleString()}
+                          </td>
+                          <td className={`px-4 py-3 whitespace-nowrap text-right font-bold ${inv.remainingBalance > 0 ? 'text-rose-700' : 'text-gray-400'}`}>
+                            ₦{inv.remainingBalance.toLocaleString()}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap text-center">
+                            {inv.status === 'paid' ? (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                                Paid
+                              </span>
+                            ) : inv.status === 'partial' ? (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
+                                Partial
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800">
+                                Unpaid
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap text-right space-x-2">
+                            {inv.remainingBalance > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => handleOpenPaymentModal(inv)}
+                                className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded text-xs font-semibold"
+                              >
+                                Pay
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleOpenPrintBill(inv._id)}
+                              className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded text-xs font-semibold inline-flex items-center"
+                            >
+                              <Printer className="h-3 w-3 mr-1" /> View/Print
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
         </>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB 2: FEES DASHBOARD SUMMARY */}
+      {/* ========================================================================= */}
+      {activeTab === 'dashboard' && dashboardStats && (
+        <div className="space-y-6 print:hidden">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+            <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-xs">
+              <span className="text-xs font-semibold text-gray-500 uppercase">Total Bills Generated</span>
+              <p className="text-2xl font-bold text-gray-900 mt-2">{dashboardStats.totalBillsGenerated || 0}</p>
+            </div>
+            <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-xs">
+              <span className="text-xs font-semibold text-blue-600 uppercase">Total Expected Fees</span>
+              <p className="text-2xl font-bold text-blue-700 mt-2">₦{Number(dashboardStats.totalExpected || 0).toLocaleString()}</p>
+            </div>
+            <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-xs">
+              <span className="text-xs font-semibold text-emerald-600 uppercase">Total Collections</span>
+              <p className="text-2xl font-bold text-emerald-700 mt-2">₦{Number(dashboardStats.totalCollected || 0).toLocaleString()}</p>
+            </div>
+            <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-xs">
+              <span className="text-xs font-semibold text-rose-600 uppercase">Outstanding Balances</span>
+              <p className="text-2xl font-bold text-rose-700 mt-2">₦{Number(dashboardStats.totalOutstanding || 0).toLocaleString()}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* CONFIRM BILL GENERATION MODAL */}
+      {/* ========================================================================= */}
+      {showConfirmModal && selectedClass && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-gray-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-gray-200 p-6 space-y-4">
+            <div className="flex items-center justify-between border-b pb-3">
+              <h3 className="text-lg font-bold text-gray-900">Confirm Class Bill Generation</h3>
+              <button onClick={() => setShowConfirmModal(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-gray-600">
+              You are about to generate individual student invoices for the entire class.
+              Each invoice will apply the current term charges and automatically include each student's previous term carryover debt.
+            </p>
+
+            <div className="bg-gray-50 rounded-xl p-4 space-y-2 text-xs">
+              <div className="flex justify-between">
+                <span className="text-gray-600">Class:</span>
+                <strong className="text-gray-900">{selectedClass.name}</strong>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600">Students to Bill:</span>
+                <strong className="text-gray-900">{carryoverStudents.length} students</strong>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600">Current Term Charge / Student:</span>
+                <strong className="text-indigo-700">₦{currentTermCharges.toLocaleString()}</strong>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600">Total Carryover Debt Across Class:</span>
+                <strong className="text-rose-600">₦{totalCarryoverAcrossClass.toLocaleString()}</strong>
+              </div>
+              <div className="flex justify-between border-t pt-2 font-bold text-sm">
+                <span className="text-gray-900">Total Expected Amount:</span>
+                <span className="text-emerald-700">₦{totalClassExpectedAmount.toLocaleString()}</span>
+              </div>
+            </div>
+
+            {alreadyBilled && (
+              <div className="bg-amber-50 border border-amber-200 p-3 rounded-lg text-xs text-amber-900">
+                <strong>Notice:</strong> Invoices already exist for this class ({existingInvoiceCount} existing invoice{existingInvoiceCount === 1 ? '' : 's'}). Proceeding will revise/update existing invoices.
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-3 pt-3 border-t">
+              <button
+                type="button"
+                onClick={() => setShowConfirmModal(false)}
+                className="px-4 py-2 border border-gray-300 text-xs font-semibold rounded-lg text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleConfirmGenerateBill(alreadyBilled)}
+                disabled={generating}
+                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow-sm"
+              >
+                {generating ? 'Generating Invoices...' : 'Yes, Generate Invoices'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* RECORD PAYMENT MODAL */}
+      {/* ========================================================================= */}
+      {showPaymentModal && paymentInvoice && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-gray-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-gray-200 p-6 space-y-4">
+            <div className="flex items-center justify-between border-b pb-3">
+              <h3 className="text-base font-bold text-gray-900">Record Fee Payment</h3>
+              <button onClick={() => setShowPaymentModal(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div className="bg-gray-50 p-3 rounded-lg space-y-1">
+                <p>Student: <strong>{paymentInvoice.fullName}</strong> ({paymentInvoice.admissionNo})</p>
+                <p>Invoice #: <strong className="font-mono text-indigo-700">{paymentInvoice.invoiceNumber}</strong></p>
+                <p>Remaining Balance: <strong className="text-rose-600">₦{paymentInvoice.remainingBalance.toLocaleString()}</strong></p>
+              </div>
+
+              <div>
+                <label className="block font-bold text-gray-700 uppercase mb-1">Amount Paid (₦)</label>
+                <input
+                  type="number"
+                  min="1"
+                  max={paymentInvoice.remainingBalance}
+                  value={paymentAmount}
+                  onChange={(e) => setPaymentAmount(e.target.value === '' ? '' : parseFloat(e.target.value))}
+                  className="w-full p-2.5 border rounded-lg text-sm font-bold"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-gray-700 uppercase mb-1">Payment Note / Reference</label>
+                <input
+                  type="text"
+                  value={paymentNote}
+                  onChange={(e) => setPaymentNote(e.target.value)}
+                  className="w-full p-2.5 border rounded-lg text-xs"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-3 border-t">
+              <button
+                type="button"
+                onClick={() => setShowPaymentModal(false)}
+                className="px-4 py-2 border text-xs font-semibold rounded-lg text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleRecordPayment}
+                disabled={recordingPayment}
+                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-sm"
+              >
+                {recordingPayment ? 'Recording...' : 'Record Payment'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* PRINTABLE BILL / INVOICE MODAL (A4 Layout with School Branding) */}
+      {/* ========================================================================= */}
+      {printingInvoice && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-gray-900/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-3xl w-full shadow-2xl border border-gray-200 overflow-hidden my-8">
+            <div className="p-4 bg-gray-100 flex items-center justify-between border-b print:hidden">
+              <button
+                onClick={() => setPrintingInvoice(null)}
+                className="text-xs font-semibold text-gray-600 hover:text-gray-900 inline-flex items-center"
+              >
+                <ArrowLeft className="h-3.5 w-3.5 mr-1" /> Close Preview
+              </button>
+              <button
+                onClick={() => window.print()}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg inline-flex items-center shadow-xs cursor-pointer"
+              >
+                <Printer className="h-3.5 w-3.5 mr-1.5" /> Print Bill (A4)
+              </button>
+            </div>
+
+            <div className="p-8 space-y-6">
+              {/* School Branding Header */}
+              <div className="text-center border-b-2 border-gray-900 pb-4">
+                <h1 className="text-2xl font-black text-gray-900 uppercase tracking-wide">
+                  {printingInvoice.school?.name || 'School Bridge Academy'}
+                </h1>
+                <p className="text-gray-600 text-xs mt-1">{printingInvoice.school?.address || 'School Address'}</p>
+                <h2 className="text-lg font-bold text-indigo-900 mt-2 uppercase tracking-wide">
+                  Official Student Fee Invoice / Bill
+                </h2>
+                <p className="text-xs text-gray-500 font-mono mt-0.5">
+                  Invoice #: {printingInvoice.invoice?.invoiceNumber}
+                </p>
+              </div>
+
+              {/* Student & Bill Details */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-4 bg-gray-50 rounded-lg border border-gray-200 text-xs">
+                <div>
+                  <span className="text-gray-500 block">Student Name:</span>
+                  <strong className="text-gray-900 text-sm">{printingInvoice.invoice?.studentId?.fullName}</strong>
+                </div>
+                <div>
+                  <span className="text-gray-500 block">Admission Number:</span>
+                  <strong className="font-mono text-gray-900">{printingInvoice.invoice?.studentId?.admissionNo}</strong>
+                </div>
+                <div>
+                  <span className="text-gray-500 block">Class:</span>
+                  <strong className="text-gray-900">{printingInvoice.classInfo?.name} - {printingInvoice.classInfo?.arm}</strong>
+                </div>
+                <div>
+                  <span className="text-gray-500 block">Due Date:</span>
+                  <strong className="text-gray-900">
+                    {new Date(printingInvoice.invoice?.dueDate).toLocaleDateString()}
+                  </strong>
+                </div>
+              </div>
+
+              {/* Itemized Charges */}
+              <div className="space-y-4">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-gray-700 border-b pb-1">
+                  Current Term Charges Breakdown
+                </h3>
+                <table className="min-w-full divide-y divide-gray-200 text-xs border border-gray-200">
+                  <thead className="bg-gray-100 font-bold text-gray-700 uppercase">
+                    <tr>
+                      <th className="px-4 py-2 text-left">Description / Service</th>
+                      <th className="px-4 py-2 text-right">Amount (₦)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {(printingInvoice.invoice?.lineItems || [])
+                      .filter((item: any) => !item.isCarryover)
+                      .map((item: any, idx: number) => (
+                        <tr key={idx}>
+                          <td className="px-4 py-2 text-gray-900 font-medium">{item.name}</td>
+                          <td className="px-4 py-2 text-right font-bold text-gray-900">
+                            ₦{Number(item.amount).toLocaleString()}
+                          </td>
+                        </tr>
+                      ))}
+                    <tr className="bg-gray-50 font-bold">
+                      <td className="px-4 py-2 text-gray-900">Subtotal Current Charges</td>
+                      <td className="px-4 py-2 text-right text-indigo-700 font-bold">
+                        ₦{Number(printingInvoice.invoice?.currentTermCharges || 0).toLocaleString()}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Previous Term Outstanding (Carryover) */}
+              <div className="space-y-4">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-rose-700 border-b pb-1">
+                  Previous Term Outstanding (Carryover)
+                </h3>
+                <table className="min-w-full divide-y divide-gray-200 text-xs border border-gray-200">
+                  <tbody className="divide-y divide-gray-200">
+                    <tr>
+                      <td className="px-4 py-2 text-gray-900 font-medium">Previous Term Outstanding Balance</td>
+                      <td className="px-4 py-2 text-right font-bold text-rose-700">
+                        ₦{Number(printingInvoice.invoice?.previousTermCarryover || 0).toLocaleString()}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Financial Summary */}
+              <div className="bg-indigo-50 border border-indigo-200 p-4 rounded-xl space-y-2 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-indigo-900">Total Current Term Charges:</span>
+                  <strong className="text-indigo-950 font-mono">
+                    ₦{Number(printingInvoice.invoice?.currentTermCharges || 0).toLocaleString()}
+                  </strong>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-indigo-900">Previous Term Carryover:</span>
+                  <strong className="text-rose-700 font-mono">
+                    ₦{Number(printingInvoice.invoice?.previousTermCarryover || 0).toLocaleString()}
+                  </strong>
+                </div>
+                <div className="flex justify-between border-t border-indigo-200 pt-2 text-sm font-bold">
+                  <span className="text-indigo-950">Total Payable Amount:</span>
+                  <span className="text-indigo-950 font-mono">
+                    ₦{Number(printingInvoice.invoice?.amountDue || 0).toLocaleString()}
+                  </span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-emerald-800">Total Payments Recorded:</span>
+                  <strong className="text-emerald-800 font-mono">
+                    ₦{Number(printingInvoice.totalPaid || 0).toLocaleString()}
+                  </strong>
+                </div>
+                <div className="flex justify-between border-t border-indigo-200 pt-2 text-sm font-bold">
+                  <span className="text-rose-800">Net Outstanding Balance:</span>
+                  <span className="text-rose-800 font-mono">
+                    ₦{Number(printingInvoice.remainingBalance || 0).toLocaleString()}
+                  </span>
+                </div>
+              </div>
+
+              {/* Signatures */}
+              <div className="pt-8 border-t-2 border-gray-300 flex justify-between text-xs text-gray-600">
+                <div className="text-center">
+                  <div className="w-40 border-b border-gray-400 mb-1"></div>
+                  <span>Bursar / Accountant Signature</span>
+                </div>
+                <div className="text-center">
+                  <div className="w-40 border-b border-gray-400 mb-1"></div>
+                  <span>Official School Stamp</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
