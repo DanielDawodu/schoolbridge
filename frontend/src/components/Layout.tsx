@@ -22,6 +22,8 @@ import {
   ChevronLeft,
   ChevronRight,
   GraduationCap,
+  Palette,
+  Award,
 } from 'lucide-react';
 
 interface NavItem {
@@ -47,11 +49,9 @@ const navGroups: NavGroup[] = [
     label: 'ACADEMICS',
     items: [
       { name: 'Classes', path: '/classes', icon: School },
-      { name: 'Subjects', path: '/subjects', icon: BookOpen, roles: ['admin'] },
       { name: 'Result Entry', path: '/result-entry', icon: FileEdit },
       { name: 'Report Cards', path: '/report-cards', icon: FileText, roles: ['admin'] },
       { name: 'Half Term Report', path: '/half-term-report', icon: FileSpreadsheet, roles: ['admin'] },
-      { name: 'Promotion', path: '/promotion', icon: TrendingUp, roles: ['admin'] },
     ],
   },
   {
@@ -75,10 +75,14 @@ const navGroups: NavGroup[] = [
     ],
   },
   {
-    label: 'ADMINISTRATION',
+    label: 'SETTINGS',
     items: [
+      { name: 'Subjects', path: '/subjects', icon: BookOpen, roles: ['admin'] },
+      { name: 'Promotion', path: '/promotion', icon: TrendingUp, roles: ['admin'] },
+      { name: 'School Branding', path: '/settings/branding', icon: Palette, roles: ['admin'] },
+      { name: 'Grading System', path: '/settings/grading', icon: Award, roles: ['admin'] },
+      { name: 'General Settings', path: '/settings', icon: Settings, roles: ['admin'] },
       { name: 'Migration', path: '/migration', icon: ArrowRightLeft, roles: ['admin'] },
-      { name: 'Settings', path: '/settings', icon: Settings, roles: ['admin'] },
     ],
   },
 ];

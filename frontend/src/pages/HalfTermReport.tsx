@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import api from '../services/api';
 import { ClassSelectionGrid } from '../components/ClassSelectionGrid';
+import DocumentHeader from '../components/DocumentHeader';
+import { printElement } from '../utils/printHelper';
 import {
   Printer,
   ChevronRight,
@@ -324,9 +326,29 @@ const HalfTermReport: React.FC = () => {
     if (isCompleted && currentUser?.role !== 'admin') return false;
     if (currentUser?.role === 'admin') return true;
     if (currentUser?.role === 'teacher') {
-      const currentUserId = currentUser._id || currentUser.userId;
-      const assignedId = reg.assignedTeacherId?._id;
-      return assignedId?.toString() === currentUserId?.toString();
+      const currentUserId = (currentUser._id || currentUser.userId || '').toString();
+      const assignedId = typeof reg.assignedTeacherId === 'object' && reg.assignedTeacherId?._id
+        ? reg.assignedTeacherId._id.toString()
+        : reg.assignedTeacherId ? reg.assignedTeacherId.toString() : '';
+
+      // Direct assignment to subject
+      if (assignedId && assignedId === currentUserId) return true;
+
+      // Or teacher assigned to class
+      const userAssignedClasses = (currentUser.assignedClasses || []).map((c: any) =>
+        typeof c === 'object' && c._id ? c._id.toString() : c.toString()
+      );
+      const activeClassId = selectedClass?._id;
+      if (activeClassId && userAssignedClasses.includes(activeClassId.toString())) {
+        return true;
+      }
+
+      // If subject has no teacher assigned at all, class teacher or authorized teacher can enter
+      if (!assignedId && selectedClass?.assignedTeachers?.some((t: any) => (t._id || t).toString() === currentUserId)) {
+        return true;
+      }
+
+      return false;
     }
     return false;
   };
@@ -500,7 +522,7 @@ const HalfTermReport: React.FC = () => {
   };
 
   const handlePrint = () => {
-    window.print();
+    printElement('printable-half-term-report', `Half-Term Report - ${selectedStudent?.fullName || 'Student'}`);
   };
 
   const filteredStudents = useMemo(() => {
@@ -926,20 +948,24 @@ const HalfTermReport: React.FC = () => {
           </div>
 
           {/* OFFICIAL HALF-TERM REPORT CARD (Used for Print & Preview) */}
-          <div className="bg-white rounded-lg shadow-sm p-8 border border-gray-200 print:shadow-none print:rounded-none print:border-none print:p-0">
-            {/* School Header */}
-            <div className="text-center mb-6 border-b-2 border-gray-800 pb-4">
-              <h1 className="text-2xl font-bold text-gray-900 uppercase tracking-wide">{school.name}</h1>
-              <p className="text-gray-600 text-sm mt-1">{school.address}</p>
-              <h2 className="text-lg font-bold text-indigo-900 mt-2 tracking-wide uppercase">
-                Half Term Assessment Report
-              </h2>
-              {sessionInfo && (
-                <p className="text-xs text-gray-500 font-semibold mt-0.5">
-                  Academic Session: {sessionInfo.year} | Term: {sessionInfo.currentTerm.toUpperCase()}
-                </p>
-              )}
-            </div>
+          <div
+            id="printable-half-term-report"
+            className="bg-white rounded-lg shadow-sm p-8 border border-gray-200 print:shadow-none print:rounded-none print:border-none print:p-0"
+          >
+            {/* Universal Document Header */}
+            <DocumentHeader
+              title="HALF TERM ASSESSMENT REPORT"
+              documentNumber={result?.verificationCode || ''}
+              date={new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+            />
+
+            {sessionInfo && (
+              <div className="text-center py-2 mb-4 bg-gray-50 rounded-lg border border-gray-200">
+                <span className="text-xs font-bold text-gray-700 tracking-wide uppercase">
+                  Academic Session: {sessionInfo.year} &nbsp;•&nbsp; Term: {sessionInfo.currentTerm.toUpperCase()}
+                </span>
+              </div>
+            )}
 
             {/* Student Info Box */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-4 bg-gray-50 rounded-lg border border-gray-200 mb-6 text-xs">

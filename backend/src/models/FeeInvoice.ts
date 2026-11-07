@@ -3,6 +3,7 @@ import mongoose, { Schema, Document } from 'mongoose';
 export interface IInvoiceLineItem {
   name: string;
   amount: number;
+  note?: string;
   isTuition?: boolean;
   isCarryover?: boolean;
 }
@@ -37,6 +38,7 @@ export interface IFeeInvoice extends Document {
 const InvoiceLineItemSchema = new Schema({
   name: { type: String, required: true },
   amount: { type: Number, required: true, min: 0 },
+  note: { type: String },
   isTuition: { type: Boolean, default: false },
   isCarryover: { type: Boolean, default: false },
 });

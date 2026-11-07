@@ -1,12 +1,15 @@
 import React, { useEffect, useState } from 'react';
-import { Trophy, CheckCircle2, BarChart3 } from 'lucide-react';
+import { Trophy, CheckCircle2, BarChart3, Layers } from 'lucide-react';
 import api from '../services/api';
 
 interface ClassGroup {
   _id: string;
-  name: string;
+  name?: string;
   arm: string;
+  faction?: 'Science' | 'Arts' | 'Commercial' | null;
+  classLevelId?: { _id: string; name: string };
   sessionId: string | { _id: string }; // Allow both string ID and populated object
+  studentCount?: number;
 }
 
 interface AcademicSession {
@@ -42,6 +45,7 @@ const Classes: React.FC = () => {
     name: '',
     arm: '',
     sessionId: '',
+    faction: '' as 'Science' | 'Arts' | 'Commercial' | '',
   });
 
   useEffect(() => {
@@ -128,14 +132,21 @@ const Classes: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      const payload = {
+        name: formData.name,
+        arm: formData.arm,
+        sessionId: formData.sessionId,
+        faction: formData.faction || null,
+      };
+
       if (editingClass) {
-        await api.put(`/classes/${editingClass._id}`, formData);
+        await api.put(`/classes/${editingClass._id}`, payload);
       } else {
-        await api.post('/classes', formData);
+        await api.post('/classes', payload);
       }
       setShowModal(false);
       setEditingClass(null);
-      setFormData({ name: '', arm: '', sessionId: '' });
+      setFormData({ name: '', arm: '', sessionId: '', faction: '' });
       fetchData();
     } catch (error: any) {
       alert(error.response?.data?.error || 'Failed to save class');
@@ -147,10 +158,12 @@ const Classes: React.FC = () => {
     const sessionId = typeof classGroup.sessionId === 'object'
       ? classGroup.sessionId._id
       : classGroup.sessionId;
+    const className = classGroup.name || (classGroup.classLevelId as any)?.name || '';
     setFormData({
-      name: classGroup.name,
+      name: className,
       arm: classGroup.arm,
       sessionId: sessionId || '',
+      faction: classGroup.faction || '',
     });
     setShowModal(true);
   };
@@ -167,7 +180,7 @@ const Classes: React.FC = () => {
 
   const openModal = () => {
     setEditingClass(null);
-    setFormData({ name: '', arm: '', sessionId: sessions[0]?._id || '' });
+    setFormData({ name: '', arm: '', sessionId: sessions[0]?._id || '', faction: '' });
     setShowModal(true);
   };
 
@@ -198,14 +211,14 @@ const Classes: React.FC = () => {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Class Management & Performance</h1>
           <p className="text-sm text-gray-500">
-            Manage classes, inspect academic leaderboards, and monitor report completion
+            Manage classes, specialisation streams (factions), academic leaderboards, and report completion
           </p>
         </div>
         <div className="flex items-center space-x-2">
           {activeTab === 'classes' && (
             <button
               onClick={openModal}
-              className="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 text-sm font-medium shadow-sm"
+              className="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 text-sm font-medium shadow-xs"
             >
               Add Class
             </button>
@@ -255,7 +268,7 @@ const Classes: React.FC = () => {
       {activeTab === 'classes' && (
         <div className="space-y-4">
           {classes.length === 0 ? (
-            <div className="bg-white rounded-lg shadow p-12 text-center">
+            <div className="bg-white rounded-lg shadow-xs p-12 text-center">
               <p className="text-gray-500 mb-4">No classes found</p>
               <button
                 onClick={openModal}
@@ -265,15 +278,18 @@ const Classes: React.FC = () => {
               </button>
             </div>
           ) : (
-            <div className="bg-white rounded-lg shadow overflow-hidden">
+            <div className="bg-white rounded-lg shadow-xs overflow-hidden border border-gray-200">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Class Name
+                      Class Level & Name
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Arm
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Stream / Faction
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Academic Session
@@ -292,13 +308,24 @@ const Classes: React.FC = () => {
                       ? classGroup.sessionId._id
                       : classGroup.sessionId;
                     const session = sessions.find((s) => s._id === sessionId);
+                    const displayName = classGroup.name || (classGroup.classLevelId as any)?.name || 'Class';
                     return (
                       <tr key={classGroup._id} className="hover:bg-gray-50 transition-colors">
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                          {classGroup.name}
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
+                          {displayName}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
                           {classGroup.arm}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm">
+                          {classGroup.faction ? (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-50 text-purple-700 border border-purple-200">
+                              <Layers className="w-3 h-3 mr-1" />
+                              {classGroup.faction}
+                            </span>
+                          ) : (
+                            <span className="text-gray-400 text-xs">General</span>
+                          )}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                           {session ? `${session.year} - ${session.currentTerm}` : 'Not assigned'}
@@ -345,224 +372,80 @@ const Classes: React.FC = () => {
         </div>
       )}
 
-      {/* SHARED CONTROLS BAR FOR LEADERBOARD & COMPLETION TABS */}
-      {(activeTab === 'leaderboard' || activeTab === 'completion') && (
-        <div className="bg-white rounded-lg shadow p-4 border border-gray-100 flex flex-wrap items-center justify-between gap-4">
-          <div className="flex flex-wrap items-center gap-3">
+      {/* TAB 2: CLASS LEADERBOARD */}
+      {activeTab === 'leaderboard' && (
+        <div className="space-y-6">
+          <div className="bg-white p-4 rounded-lg shadow-xs border border-gray-200 flex flex-wrap items-center gap-4">
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Select Class</label>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Class</label>
               <select
                 value={selectedClassId}
                 onChange={(e) => setSelectedClassId(e.target.value)}
-                className="text-sm px-3 py-1.5 border border-gray-300 rounded-md bg-white focus:ring-1 focus:ring-indigo-500"
+                className="px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:ring-indigo-500 focus:border-indigo-500"
               >
                 {classes.map((c) => (
                   <option key={c._id} value={c._id}>
-                    {c.name} - {c.arm}
+                    {c.name || (c.classLevelId as any)?.name} - {c.arm} {c.faction ? `(${c.faction})` : ''}
                   </option>
                 ))}
               </select>
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Academic Session</label>
-              <select
-                value={selectedSessionId}
-                onChange={(e) => setSelectedSessionId(e.target.value)}
-                className="text-sm px-3 py-1.5 border border-gray-300 rounded-md bg-white focus:ring-1 focus:ring-indigo-500"
-              >
-                {sessions.map((s) => (
-                  <option key={s._id} value={s._id}>
-                    {s.year} - {s.currentTerm}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Assessment Type</label>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Assessment Type</label>
               <select
                 value={selectedAssessmentType}
-                onChange={(e) => setSelectedAssessmentType(e.target.value as 'term' | 'mid-term')}
-                className="text-sm px-3 py-1.5 border border-gray-300 rounded-md bg-white focus:ring-1 focus:ring-indigo-500"
+                onChange={(e) => setSelectedAssessmentType(e.target.value as any)}
+                className="px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:ring-indigo-500 focus:border-indigo-500"
               >
-                <option value="term">Full Term</option>
-                <option value="mid-term">Mid-Term</option>
+                <option value="term">Full Term Report</option>
+                <option value="mid-term">Mid-Term / Half-Term</option>
               </select>
             </div>
           </div>
 
-          <div>
-            <button
-              onClick={() => (activeTab === 'leaderboard' ? fetchLeaderboard() : fetchCompletion())}
-              disabled={loadingLeaderboard || loadingCompletion}
-              className="text-xs bg-indigo-50 text-indigo-600 border border-indigo-200 px-3.5 py-2 rounded-md hover:bg-indigo-100 font-medium transition-colors"
-            >
-              {loadingLeaderboard || loadingCompletion ? 'Refreshing...' : 'Refresh Data'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* TAB 2: CLASS LEADERBOARD */}
-      {activeTab === 'leaderboard' && (
-        <div className="space-y-4">
           {loadingLeaderboard ? (
-            <div className="bg-white rounded-lg shadow p-12 text-center">
-              <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mb-2"></div>
-              <p className="text-sm text-gray-500">Calculating student rankings and class averages...</p>
+            <div className="text-center py-12">
+              <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
             </div>
-          ) : !leaderboardData || leaderboardData.leaderboard?.length === 0 ? (
-            <div className="bg-white rounded-lg shadow p-12 text-center border border-dashed border-gray-300">
-              <Trophy className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-              <h3 className="text-base font-semibold text-gray-900">No Published Rankings Available</h3>
-              <p className="text-sm text-gray-500 max-w-md mx-auto mt-1">
-                Student rankings appear once teachers complete results. Students with incomplete results are excluded from the official class leaderboard.
-              </p>
+          ) : leaderboardData && leaderboardData.leaderboard ? (
+            <div className="bg-white rounded-lg shadow-xs overflow-hidden border border-gray-200">
+              <div className="p-4 bg-gray-50 border-b flex justify-between items-center">
+                <h3 className="font-bold text-gray-900 text-sm">
+                  Academic Rankings: {selectedClass?.name || (selectedClass?.classLevelId as any)?.name} - {selectedClass?.arm}
+                </h3>
+                <span className="text-xs text-gray-500">
+                  Total Ranked: {leaderboardData.leaderboard.length} students
+                </span>
+              </div>
+              <table className="min-w-full divide-y divide-gray-200 text-sm">
+                <thead className="bg-gray-50 text-xs font-medium text-gray-500 uppercase">
+                  <tr>
+                    <th className="px-6 py-3 text-center w-16">Position</th>
+                    <th className="px-6 py-3 text-left">Student</th>
+                    <th className="px-6 py-3 text-left">Admission No</th>
+                    <th className="px-6 py-3 text-right">Total Score</th>
+                    <th className="px-6 py-3 text-right">Average (%)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {leaderboardData.leaderboard.map((item: any, idx: number) => (
+                    <tr key={idx} className={idx < 3 ? 'bg-amber-50/40' : ''}>
+                      <td className="px-6 py-3 text-center font-bold">
+                        {item.position === 1 ? '🥇 1st' : item.position === 2 ? '🥈 2nd' : item.position === 3 ? '🥉 3rd' : `${item.position}th`}
+                      </td>
+                      <td className="px-6 py-3 font-semibold text-gray-900">{item.fullName}</td>
+                      <td className="px-6 py-3 text-gray-500">{item.admissionNo}</td>
+                      <td className="px-6 py-3 text-right font-medium">{item.totalScore}</td>
+                      <td className="px-6 py-3 text-right font-bold text-indigo-700">{item.overallPercentage}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           ) : (
-            <div className="space-y-4">
-              {/* Leaderboard Summary Banner */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-lg p-4">
-                  <span className="text-xs font-medium text-amber-800">Class Average Percentage</span>
-                  <p className="text-2xl font-bold text-amber-900 mt-1">
-                    {leaderboardData.classAveragePercentage}%
-                  </p>
-                  <p className="text-xs text-amber-700 mt-0.5">Average across all completed students</p>
-                </div>
-
-                <div className="bg-gradient-to-br from-indigo-50 to-blue-50 border border-indigo-200 rounded-lg p-4">
-                  <span className="text-xs font-medium text-indigo-800">Ranked Students</span>
-                  <p className="text-2xl font-bold text-indigo-900 mt-1">
-                    {leaderboardData.completedStudentsCount} / {leaderboardData.totalStudentsInClass}
-                  </p>
-                  <p className="text-xs text-indigo-700 mt-0.5">Completed result sheets published</p>
-                </div>
-
-                <div className="bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-200 rounded-lg p-4">
-                  <span className="text-xs font-medium text-emerald-800">Top Position Score</span>
-                  <p className="text-2xl font-bold text-emerald-900 mt-1">
-                    {leaderboardData.leaderboard[0]?.overallPercentage || 0}%
-                  </p>
-                  <p className="text-xs text-emerald-700 mt-0.5">
-                    {leaderboardData.leaderboard[0]?.fullName}
-                  </p>
-                </div>
-              </div>
-
-              {/* Leaderboard Table */}
-              <div className="bg-white rounded-lg shadow overflow-hidden border border-gray-200">
-                <div className="px-6 py-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
-                  <div>
-                    <h3 className="font-semibold text-gray-900">
-                      Official Academic Rankings: {selectedClass ? `${selectedClass.name} - ${selectedClass.arm}` : ''}
-                    </h3>
-                    <p className="text-xs text-gray-500">
-                      Standard competition ranking (1st, 1st, 3rd) based on overall percentage
-                    </p>
-                  </div>
-                  <span className="text-xs font-semibold px-2.5 py-1 bg-green-100 text-green-800 rounded-full">
-                    Completed Results Only
-                  </span>
-                </div>
-
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200 text-sm">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase w-20">
-                          Rank
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">
-                          Student Name
-                        </th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">
-                          Admission No
-                        </th>
-                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">
-                          Total Marks
-                        </th>
-                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">
-                          Overall %
-                        </th>
-                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">
-                          Class Avg %
-                        </th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">
-                          Status
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200 bg-white">
-                      {leaderboardData.leaderboard.map((item: any) => {
-                        return (
-                          <tr
-                            key={item.studentId}
-                            className={`hover:bg-gray-50 transition-colors ${
-                              item.position === 1 ? 'bg-amber-50/40' : ''
-                            }`}
-                          >
-                            <td className="px-4 py-3 text-center">
-                              <span
-                                className={`inline-flex items-center justify-center font-bold rounded-full ${
-                                  item.position === 1
-                                    ? 'w-7 h-7 bg-amber-400 text-amber-950 text-xs shadow-sm'
-                                    : item.position === 2
-                                    ? 'w-7 h-7 bg-slate-300 text-slate-800 text-xs'
-                                    : item.position === 3
-                                    ? 'w-7 h-7 bg-amber-700 text-white text-xs'
-                                    : 'text-gray-700 text-xs font-semibold'
-                                }`}
-                              >
-                                {item.position === 1 ? '1st' : item.position === 2 ? '2nd' : item.position === 3 ? '3rd' : `${item.position}th`}
-                              </span>
-                            </td>
-                            <td className="px-6 py-3 font-medium text-gray-900">
-                              <div className="flex items-center space-x-2">
-                                <span>{item.fullName}</span>
-                                {item.position === 1 && (
-                                  <Trophy className="w-4 h-4 text-amber-500 flex-shrink-0" />
-                                )}
-                              </div>
-                            </td>
-                            <td className="px-4 py-3 text-gray-600 font-mono text-xs">
-                              {item.admissionNo}
-                            </td>
-                            <td className="px-4 py-3 text-center font-semibold text-gray-800">
-                              {item.totalScore}
-                              {item.totalAvailableMarks > 0 && (
-                                <span className="text-gray-400 font-normal text-xs">
-                                  {' '}/ {item.totalAvailableMarks}
-                                </span>
-                              )}
-                            </td>
-                            <td className="px-4 py-3 text-center">
-                              <span className="font-bold text-indigo-600 text-sm">
-                                {item.overallPercentage}%
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 text-center text-gray-500 text-xs">
-                              {item.classAveragePercentage}%
-                            </td>
-                            <td className="px-4 py-3 text-right">
-                              <span
-                                className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold ${
-                                  item.isApproved
-                                    ? 'bg-blue-100 text-blue-800'
-                                    : 'bg-green-100 text-green-800'
-                                }`}
-                              >
-                                {item.isApproved ? 'Approved' : 'Completed'}
-                              </span>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+            <div className="p-8 text-center text-gray-500 bg-white rounded-lg shadow-xs border border-gray-200">
+              No completed results available to generate leaderboard for this class.
             </div>
           )}
         </div>
@@ -570,129 +453,124 @@ const Classes: React.FC = () => {
 
       {/* TAB 3: COMPLETION TRACKER */}
       {activeTab === 'completion' && (
-        <div className="space-y-4">
+        <div className="space-y-6">
+          <div className="bg-white p-4 rounded-lg shadow-xs border border-gray-200 flex flex-wrap items-center gap-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Class</label>
+              <select
+                value={selectedClassId}
+                onChange={(e) => setSelectedClassId(e.target.value)}
+                className="px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:ring-indigo-500 focus:border-indigo-500"
+              >
+                {classes.map((c) => (
+                  <option key={c._id} value={c._id}>
+                    {c.name || (c.classLevelId as any)?.name} - {c.arm} {c.faction ? `(${c.faction})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Assessment Type</label>
+              <select
+                value={selectedAssessmentType}
+                onChange={(e) => setSelectedAssessmentType(e.target.value as any)}
+                className="px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:ring-indigo-500 focus:border-indigo-500"
+              >
+                <option value="term">Full Term Report</option>
+                <option value="mid-term">Mid-Term / Half-Term</option>
+              </select>
+            </div>
+          </div>
+
           {loadingCompletion ? (
-            <div className="bg-white rounded-lg shadow p-12 text-center">
-              <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mb-2"></div>
-              <p className="text-sm text-gray-500">Checking class completion records...</p>
+            <div className="text-center py-12">
+              <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
             </div>
-          ) : !completionData ? (
-            <div className="bg-white rounded-lg shadow p-12 text-center">
-              <p className="text-gray-500 text-sm">Select a class to view report completion details.</p>
-            </div>
-          ) : (
-            <div className="bg-white rounded-lg shadow p-6 border border-gray-200">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-gray-200 mb-4 gap-3">
+          ) : completionData ? (
+            <div className="bg-white rounded-lg shadow-xs p-6 border border-gray-200 space-y-6">
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pb-4 border-b">
                 <div>
-                  <h2 className="text-lg font-bold text-gray-900">
-                    Result Completion: {selectedClass ? `${selectedClass.name} - ${selectedClass.arm}` : ''}
-                  </h2>
-                  <p className="text-xs text-gray-500">
-                    Track which students have completed teacher submissions and Head Teacher comments
+                  <h3 className="text-base font-bold text-gray-900">
+                    Result Completion Status: {completionData.className}
+                  </h3>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Total Students: {completionData.totalStudents} | Completed: {completionData.completedStudents} | Awaiting: {completionData.awaitingCompletion}
                   </p>
                 </div>
-              </div>
-
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
-                <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
-                  <span className="text-xs text-gray-500 font-medium">Total Students</span>
-                  <p className="text-xl font-bold text-gray-900">{completionData.totalStudents}</p>
-                </div>
-                <div className="bg-green-50 p-3 rounded-lg border border-green-200">
-                  <span className="text-xs text-green-700 font-medium">Teacher Completed</span>
-                  <p className="text-xl font-bold text-green-700">{completionData.completedCount}</p>
-                </div>
-                <div className="bg-amber-50 p-3 rounded-lg border border-amber-200">
-                  <span className="text-xs text-amber-700 font-medium">Pending / Incomplete</span>
-                  <p className="text-xl font-bold text-amber-700">{completionData.pendingCount}</p>
-                </div>
-                <div className="bg-indigo-50 p-3 rounded-lg border border-indigo-200">
-                  <span className="text-xs text-indigo-700 font-medium">Completion Rate</span>
-                  <p className="text-xl font-bold text-indigo-700">{completionData.completionPercentage}%</p>
+                <div className="text-right">
+                  <span className="text-2xl font-black text-indigo-600">
+                    {completionData.completionPercentage}%
+                  </span>
+                  <span className="block text-[11px] text-gray-400 font-medium">COMPLETED</span>
                 </div>
               </div>
 
               {/* Progress bar */}
-              <div className="w-full bg-gray-200 rounded-full h-2.5 mb-6">
+              <div className="w-full bg-gray-200 rounded-full h-3">
                 <div
-                  className="bg-indigo-600 h-2.5 rounded-full transition-all duration-300"
+                  className="bg-indigo-600 h-3 rounded-full transition-all duration-300"
                   style={{ width: `${completionData.completionPercentage}%` }}
-                ></div>
+                />
               </div>
 
-              {/* Students completion list */}
-              {completionData.students && completionData.students.length > 0 ? (
-                <div className="overflow-x-auto border border-gray-200 rounded-md">
-                  <table className="min-w-full divide-y divide-gray-200 text-xs">
-                    <thead className="bg-gray-50 sticky top-0">
-                      <tr>
-                        <th className="px-4 py-2.5 text-left font-medium text-gray-500">Student</th>
-                        <th className="px-4 py-2.5 text-left font-medium text-gray-500">Admission No</th>
-                        <th className="px-4 py-2.5 text-center font-medium text-gray-500">Teacher Result</th>
-                        <th className="px-4 py-2.5 text-center font-medium text-gray-500">Head Teacher Comment</th>
-                        <th className="px-4 py-2.5 text-center font-medium text-gray-500">Percentage</th>
-                        <th className="px-4 py-2.5 text-center font-medium text-gray-500">Rank</th>
-                        <th className="px-4 py-2.5 text-right font-medium text-gray-500">Printable</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200 bg-white">
-                      {completionData.students.map((st: any) => (
-                        <tr key={st.studentId} className="hover:bg-gray-50">
-                          <td className="px-4 py-2 font-medium text-gray-900">{st.fullName}</td>
-                          <td className="px-4 py-2 text-gray-500 font-mono">{st.admissionNo}</td>
-                          <td className="px-4 py-2 text-center">
-                            <span
-                              className={`px-2 py-0.5 rounded-full font-semibold text-[10px] ${
-                                st.isComplete
-                                  ? 'bg-green-100 text-green-800'
-                                  : 'bg-yellow-100 text-yellow-800'
-                              }`}
-                            >
-                              {st.isComplete ? 'Complete' : 'Pending'}
-                            </span>
-                          </td>
-                          <td className="px-4 py-2 text-center">
-                            <span
-                              className={`px-2 py-0.5 rounded-full font-semibold text-[10px] ${
-                                st.hasHeadTeacherComment
-                                  ? 'bg-blue-100 text-blue-800'
-                                  : 'bg-gray-100 text-gray-600'
-                              }`}
-                            >
-                              {st.hasHeadTeacherComment ? 'Added' : 'Awaiting'}
-                            </span>
-                          </td>
-                          <td className="px-4 py-2 text-center font-semibold text-gray-700">
-                            {st.isComplete ? `${st.percentage}%` : '-'}
-                          </td>
-                          <td className="px-4 py-2 text-center">
-                            {st.isComplete && st.classPosition ? (
-                              <span className="font-semibold text-indigo-700 text-xs">
-                                #{st.classPosition}
-                              </span>
-                            ) : (
-                              <span className="text-gray-400 text-xs">-</span>
-                            )}
-                          </td>
-                          <td className="px-4 py-2 text-right">
-                            <span
-                              className={`px-2 py-0.5 rounded-full font-semibold text-[10px] ${
-                                st.isApproved
-                                  ? 'bg-emerald-100 text-emerald-800'
-                                  : 'bg-gray-100 text-gray-500'
-                              }`}
-                            >
-                              {st.isApproved ? 'Yes' : 'No'}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <p className="text-sm text-gray-500 text-center py-4">No active students in this class.</p>
-              )}
+              {/* Student status table */}
+              <table className="min-w-full divide-y divide-gray-200 text-sm">
+                <thead className="bg-gray-50 text-xs font-medium text-gray-500 uppercase">
+                  <tr>
+                    <th className="px-4 py-2 text-left">Student Name</th>
+                    <th className="px-4 py-2 text-left">Admission No</th>
+                    <th className="px-4 py-2 text-center">Result Status</th>
+                    <th className="px-4 py-2 text-center">Head Teacher Remark</th>
+                    <th className="px-4 py-2 text-center">Print Ready</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {(completionData.students || []).map((s: any) => (
+                    <tr key={s.studentId}>
+                      <td className="px-4 py-2.5 font-medium text-gray-900">{s.fullName}</td>
+                      <td className="px-4 py-2.5 text-gray-500">{s.admissionNo}</td>
+                      <td className="px-4 py-2.5 text-center">
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold ${
+                            s.isCompleted
+                              ? 'bg-green-100 text-green-800'
+                              : 'bg-amber-100 text-amber-800'
+                          }`}
+                        >
+                          {s.isCompleted ? 'Completed' : 'Pending Scores'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5 text-center">
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold ${
+                            s.hasPrincipalComment
+                              ? 'bg-blue-100 text-blue-800'
+                              : 'bg-gray-100 text-gray-600'
+                          }`}
+                        >
+                          {s.hasPrincipalComment ? 'Signed' : 'Awaiting'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5 text-center">
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold ${
+                            s.isPrintable
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-red-50 text-red-600'
+                          }`}
+                        >
+                          {s.isPrintable ? 'Ready' : 'Locked'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="p-8 text-center text-gray-500 bg-white rounded-lg shadow-xs border border-gray-200">
+              No completion data found.
             </div>
           )}
         </div>
@@ -710,35 +588,57 @@ const Classes: React.FC = () => {
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Class Name
+                  Class Name / Level
                 </label>
                 <input
                   type="text"
                   required
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                  placeholder="e.g., JSS 1"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 text-sm"
+                  placeholder="e.g., JSS 1, SS 2"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 />
               </div>
+
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Arm</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Arm / Section</label>
                 <input
                   type="text"
                   required
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                  placeholder="e.g., A"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 text-sm"
+                  placeholder="e.g., Gold, A, Diamond"
                   value={formData.arm}
                   onChange={(e) => setFormData({ ...formData, arm: e.target.value })}
                 />
               </div>
+
+              {/* Faction / Specialisation Stream */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Academic Stream / Faction
+                </label>
+                <select
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 text-sm"
+                  value={formData.faction}
+                  onChange={(e) => setFormData({ ...formData, faction: e.target.value as any })}
+                >
+                  <option value="">None / General (Junior Sec / Primary)</option>
+                  <option value="Science">Science</option>
+                  <option value="Arts">Arts / Humanities</option>
+                  <option value="Commercial">Commercial / Business Studies</option>
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  For Senior Secondary classes, setting a stream links curriculum subjects and automatically filters result entry.
+                </p>
+              </div>
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Academic Session
                 </label>
                 <select
                   required
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 text-sm"
                   value={formData.sessionId}
                   onChange={(e) => setFormData({ ...formData, sessionId: e.target.value })}
                 >
@@ -750,19 +650,20 @@ const Classes: React.FC = () => {
                   ))}
                 </select>
               </div>
+
               <div className="flex justify-end space-x-3 pt-4 border-t">
                 <button
                   type="button"
                   onClick={() => setShowModal(false)}
-                  className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+                  className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 text-sm font-medium"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium"
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm font-semibold shadow-xs"
                 >
-                  {editingClass ? 'Update' : 'Create'}
+                  {editingClass ? 'Update Class' : 'Create Class'}
                 </button>
               </div>
             </form>

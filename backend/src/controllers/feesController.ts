@@ -374,6 +374,7 @@ export const generateClassBill = async (req: AuthRequest, res: Response): Promis
         ...additionalCharges.map((c: any) => ({
           name: c.name.trim(),
           amount: Number(c.amount),
+          note: c.note ? c.note.trim() : undefined,
         })),
       ];
 

@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import api from '../services/api';
+import DocumentHeader from '../components/DocumentHeader';
+import { printElement } from '../utils/printHelper';
 import {
   BookOpen,
   Users,
@@ -233,7 +235,7 @@ const ReportCard: React.FC = () => {
       alert('Printing is only permitted once the teacher has completed the result sheet and the Head Teacher has saved a comment.');
       return;
     }
-    window.print();
+    printElement('printable-report-card', `Report Card - ${selectedStudent?.fullName || 'Student'}`);
   };
 
   // Check if printing is enabled
@@ -624,19 +626,21 @@ const ReportCard: React.FC = () => {
           {/* STEP 5: OFFICIAL PRINTABLE REPORT CARD (A4 LAYOUT) */}
           {/* ========================================================================= */}
           {reportData && (
-            <div className="bg-white rounded-xl shadow-lg border border-gray-200 p-8 max-w-4xl mx-auto print:shadow-none print:border-none print:p-0 print:max-w-none">
-              {/* School Header */}
-              <div className="text-center border-b-2 border-gray-900 pb-4 mb-6">
-                <h1 className="text-2xl font-black text-gray-900 uppercase tracking-wider">
-                  {reportData.school?.name || 'School Name'}
-                </h1>
-                <p className="text-gray-600 text-xs mt-1">{reportData.school?.address || 'School Address'}</p>
-                <h2 className="text-lg font-bold text-indigo-950 mt-2 uppercase tracking-wide">
-                  Official Terminal Academic Report Card
-                </h2>
-                <p className="text-xs font-semibold text-gray-600 mt-0.5">
-                  Academic Session: {reportData.sessionInfo?.year} | Term: {reportData.sessionInfo?.term?.toUpperCase()}
-                </p>
+            <div
+              id="printable-report-card"
+              className="bg-white rounded-xl shadow-lg border border-gray-200 p-8 max-w-4xl mx-auto print:shadow-none print:border-none print:p-0 print:max-w-none"
+            >
+              {/* Universal Document Header */}
+              <DocumentHeader
+                title="TERMINAL ACADEMIC REPORT CARD"
+                documentNumber={reportData.result?.verificationCode || ''}
+                date={new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+              />
+
+              <div className="text-center py-2 mb-4 bg-gray-50 rounded-lg border border-gray-200">
+                <span className="text-xs font-bold text-gray-700 tracking-wide uppercase">
+                  Academic Session: {reportData.sessionInfo?.year} &nbsp;•&nbsp; Term: {reportData.sessionInfo?.term?.toUpperCase()}
+                </span>
               </div>
 
               {/* Student Summary Info Box */}

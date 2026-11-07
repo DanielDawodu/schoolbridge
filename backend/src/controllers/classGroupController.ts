@@ -8,10 +8,11 @@ import Period from '../models/Period';
 import User from '../models/User';
 import { AuthRequest } from '../middleware/auth';
 import { addSchoolFilter } from '../middleware/multiTenant';
+import { logActivity } from '../models/AuditLog';
 
 export const createClass = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { classLevelId, arm, periodId } = req.body;
+    const { classLevelId, arm, periodId, faction } = req.body;
 
     if (!classLevelId || !arm || !periodId) {
       res.status(400).json({ error: 'ClassLevel, arm, and periodId are required' });
@@ -23,12 +24,24 @@ export const createClass = async (req: AuthRequest, res: Response): Promise<void
       classLevelId,
       arm,
       periodId,
+      faction: faction || null,
     });
     await classGroup.save();
 
     // Populate for response
     await classGroup.populate('classLevelId');
     await classGroup.populate('periodId');
+
+    await logActivity({
+      schoolId: req.user?.schoolId,
+      userId: req.user?.userId,
+      userName: req.user?.name,
+      userRole: req.user?.role,
+      action: 'CREATE_CLASS',
+      module: 'subjects_classes',
+      recordId: classGroup._id.toString(),
+      description: `Created class: ${(classGroup.classLevelId as any)?.name || 'Class'} - ${classGroup.arm}${faction ? ` (${faction})` : ''}`,
+    });
 
     res.status(201).json(classGroup);
   } catch (error) {
@@ -41,101 +54,89 @@ export const getClasses = async (req: AuthRequest, res: Response): Promise<void>
   try {
     const { periodId } = req.query;
     let filter = addSchoolFilter(req);
+    
+    // Always resolve the active period if periodId is not provided
+    if (periodId) {
+      filter.periodId = periodId;
+    } else {
+      // Find active period for this school
+      const activePeriod = await Period.findOne({
+        schoolId: req.user?.schoolId,
+        isActive: true,
+      });
+      if (activePeriod) {
+        filter.periodId = activePeriod._id;
+      }
+    }
 
-    // If user is a teacher, filter by their assigned classes or classes where they teach subjects
+    // Role-based filtering: Teachers only see their assigned classes OR classes where they teach a subject
     if (req.user?.role === 'teacher') {
       const teacher = await User.findById(req.user.userId);
-      const assignedClassIds = (teacher?.assignedClasses || []).map((c: any) => c.toString());
+      const assignedClassIds = (teacher?.assignedClasses || []).map((id: any) => id.toString());
+
+      // Also check subjects where this teacher is assigned
       const subjectRegistrations = await SubjectRegistration.find({
         schoolId: req.user.schoolId,
         assignedTeacherId: req.user.userId,
       }).distinct('classId');
+
       const subjectClassIds = subjectRegistrations.map((id: any) => id.toString());
       const allTeacherClassIds = Array.from(new Set([...assignedClassIds, ...subjectClassIds]));
 
-      // If teacher has no assigned classes or subjects, return empty list cleanly
-      if (allTeacherClassIds.length === 0) {
+      // If teacher has assigned classes, filter by them
+      if (allTeacherClassIds.length > 0) {
+        filter._id = { $in: allTeacherClassIds.map((id) => new mongoose.Types.ObjectId(id)) };
+      } else {
+        // Teacher has no classes assigned
         res.json([]);
         return;
       }
-
-      const validObjectIds = allTeacherClassIds
-        .filter((id) => mongoose.Types.ObjectId.isValid(id))
-        .map((id) => new mongoose.Types.ObjectId(id));
-
-      filter._id = { $in: validObjectIds };
     }
 
-    if (periodId) {
-      filter.periodId = periodId;
-    }
-
-    // Populate classLevel and period data
-    const classes = await ClassGroup.find(filter)
+    // First try with the current filter (including periodId if set)
+    let classes = await ClassGroup.find(filter)
       .populate('classLevelId')
-      .populate('periodId')
-      .sort({ classLevelId: 1, arm: 1 });
+      .populate('periodId');
 
-    const classIds = classes.map((c) => c._id);
-
-    // Find teachers with assignedClasses
-    const teachers = await User.find({
-      schoolId: req.user?.schoolId,
-      role: 'teacher',
-    }).select('name fullName assignedClasses');
-
-    // Also find teachers from SubjectRegistration
-    const subjectRegs = await SubjectRegistration.find({
-      schoolId: req.user?.schoolId,
-      classId: { $in: classIds },
-      assignedTeacherId: { $exists: true, $ne: null },
-    }).populate('assignedTeacherId', 'name fullName');
-
-    // Count active students per class safely using countDocuments
-    const studentCountMap = new Map<string, number>();
-    for (const c of classes) {
-      try {
-        const count = await Student.countDocuments({
-          schoolId: req.user?.schoolId,
-          classId: c._id,
-          status: { $ne: 'inactive' },
-        });
-        studentCountMap.set(c._id.toString(), count);
-      } catch {
-        studentCountMap.set(c._id.toString(), 0);
+    // If no classes found and periodId was specified or auto-set, try without periodId filter
+    // This handles cases where classes exist in the school across different or legacy periods
+    if (classes.length === 0 && filter.periodId) {
+      const fallbackFilter = { ...filter };
+      delete fallbackFilter.periodId;
+      const fallbackClasses = await ClassGroup.find(fallbackFilter)
+        .populate('classLevelId')
+        .populate('periodId');
+      if (fallbackClasses.length > 0) {
+        classes = fallbackClasses;
       }
     }
 
-    const enhancedClasses = classes.map((c) => {
-      const cId = c._id.toString();
-      const classTeachers = new Set<string>();
+    // Enhance each class with assigned teachers and accurate student count
+    const enhancedClasses = await Promise.all(
+      classes.map(async (classItem) => {
+        // Find teachers assigned to this class
+        const teachers = await User.find({
+          schoolId: req.user?.schoolId,
+          role: 'teacher',
+          assignedClasses: classItem._id,
+        }).select('_id name email photoUrl');
 
-      teachers.forEach((t: any) => {
-        if ((t.assignedClasses || []).some((ac: any) => ac.toString() === cId)) {
-          classTeachers.add(t.fullName || t.name);
-        }
-      });
+        // Count students in this class
+        const studentCount = await Student.countDocuments({
+          schoolId: req.user?.schoolId,
+          classId: classItem._id,
+          status: 'active',
+        });
 
-      subjectRegs.forEach((sr: any) => {
-        if (sr.classId?.toString() === cId && sr.assignedTeacherId) {
-          const tName = sr.assignedTeacherId.fullName || sr.assignedTeacherId.name;
-          if (tName) classTeachers.add(tName);
-        }
-      });
-
-      const obj: any = c.toObject();
-      const levelName =
-        typeof c.classLevelId === 'object' && c.classLevelId
-          ? (c.classLevelId as any).name
-          : (c as any).name || 'Class';
-
-      obj.className = levelName;
-      obj.name = `${levelName} - ${c.arm}`;
-      obj.level = levelName;
-      obj.assignedTeachers = Array.from(classTeachers);
-      obj.studentCount = studentCountMap.get(cId) || 0;
-      return obj;
-    });
+        const plainClass = classItem.toObject();
+        return {
+          ...plainClass,
+          assignedTeachers: teachers,
+          studentCount,
+          faction: (classItem as any).faction || null,
+        };
+      })
+    );
 
     res.json(enhancedClasses);
   } catch (error) {
@@ -157,7 +158,45 @@ export const getClass = async (req: AuthRequest, res: Response): Promise<void> =
       return;
     }
 
-    res.json(classGroup);
+    // Role-based check for teachers
+    if (req.user?.role === 'teacher') {
+      const teacher = await User.findById(req.user.userId);
+      const isAssigned = teacher?.assignedClasses?.some(
+        (classId: any) => classId.toString() === classGroup._id.toString()
+      );
+
+      // Also check if teacher has subject registration in this class
+      const hasSubject = await SubjectRegistration.exists({
+        schoolId: req.user.schoolId,
+        classId: classGroup._id,
+        assignedTeacherId: req.user.userId,
+      });
+
+      if (!isAssigned && !hasSubject) {
+        res.status(403).json({ error: 'Access denied to this class' });
+        return;
+      }
+    }
+
+    // Fetch assigned teachers and student count
+    const teachers = await User.find({
+      schoolId: req.user?.schoolId,
+      role: 'teacher',
+      assignedClasses: classGroup._id,
+    }).select('_id name email photoUrl');
+
+    const studentCount = await Student.countDocuments({
+      schoolId: req.user?.schoolId,
+      classId: classGroup._id,
+      status: 'active',
+    });
+
+    res.json({
+      ...classGroup.toObject(),
+      assignedTeachers: teachers,
+      studentCount,
+      faction: (classGroup as any).faction || null,
+    });
   } catch (error) {
     console.error('Get class error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -167,12 +206,17 @@ export const getClass = async (req: AuthRequest, res: Response): Promise<void> =
 export const updateClass = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const { classLevelId, arm, periodId } = req.body;
+    const { classLevelId, arm, periodId, faction } = req.body;
 
     const filter = addSchoolFilter(req, { _id: id });
+    const updatePayload: any = { classLevelId, arm, periodId };
+    if (faction !== undefined) {
+      updatePayload.faction = faction || null;
+    }
+
     const classGroup = await ClassGroup.findOneAndUpdate(
       filter,
-      { classLevelId, arm, periodId },
+      updatePayload,
       { new: true }
     )
       .populate('classLevelId')
@@ -182,6 +226,17 @@ export const updateClass = async (req: AuthRequest, res: Response): Promise<void
       res.status(404).json({ error: 'Class not found' });
       return;
     }
+
+    await logActivity({
+      schoolId: req.user?.schoolId,
+      userId: req.user?.userId,
+      userName: req.user?.name,
+      userRole: req.user?.role,
+      action: 'UPDATE_CLASS',
+      module: 'subjects_classes',
+      recordId: String(id),
+      description: `Updated class: ${(classGroup.classLevelId as any)?.name || 'Class'} - ${classGroup.arm}`,
+    });
 
     res.json(classGroup);
   } catch (error) {
@@ -200,6 +255,17 @@ export const deleteClass = async (req: AuthRequest, res: Response): Promise<void
       res.status(404).json({ error: 'Class not found' });
       return;
     }
+
+    await logActivity({
+      schoolId: req.user?.schoolId,
+      userId: req.user?.userId,
+      userName: req.user?.name,
+      userRole: req.user?.role,
+      action: 'DELETE_CLASS',
+      module: 'subjects_classes',
+      recordId: String(id),
+      description: `Deleted class`,
+    });
 
     res.json({ message: 'Class deleted successfully' });
   } catch (error) {

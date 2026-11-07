@@ -7,6 +7,10 @@ import {
   setActiveTerm,
   updateSchoolSignature,
   updateSchool,
+  updateSchoolBranding,
+  getGradeScale,
+  updateGradeScale,
+  restoreDefaultGradeScale,
 } from '../controllers/schoolController';
 
 const router = express.Router();
@@ -19,9 +23,18 @@ router.get('/active-period', getActivePeriod);
 
 // Get school info (for all authenticated users)
 router.get('/me', getSchool);
+router.get('/current', getSchool);
 
 // Update school (admin only)
 router.put('/me', requireAdmin, updateSchool);
+
+// Update school branding & identity (admin only)
+router.put('/branding', requireAdmin, updateSchoolBranding);
+
+// Grading scale management
+router.get('/grade-scale', getGradeScale);
+router.put('/grade-scale', requireAdmin, updateGradeScale);
+router.post('/grade-scale/reset', requireAdmin, restoreDefaultGradeScale);
 
 // Set active term (admin only)
 router.put('/active-term', requireAdmin, setActiveTerm);

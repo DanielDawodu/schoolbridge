@@ -25,6 +25,7 @@ import sessionRoutes from './routes/sessions';
 import termRoutes from './routes/terms';
 import periodRoutes from './routes/periods';
 import classLevelRoutes from './routes/classLevels';
+import auditLogRoutes from './routes/auditLogs';
 
 const app: Application = express();
 
@@ -84,6 +85,7 @@ app.use('/api/sessions', sessionRoutes);
 app.use('/api/terms', termRoutes);
 app.use('/api/periods', periodRoutes);
 app.use('/api/class-levels', classLevelRoutes);
+app.use('/api/audit-logs', auditLogRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ ok: true });

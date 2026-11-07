@@ -37,6 +37,7 @@ const Dashboard: React.FC = () => {
     feesSummary: any;
     academicStats?: any;
     adminAcademicStats?: any;
+    onboardingChecklist?: any;
   }>({
     totalStudents: 0,
     totalClasses: 0,
@@ -44,9 +45,11 @@ const Dashboard: React.FC = () => {
     feesSummary: null,
     academicStats: null,
     adminAcademicStats: null,
+    onboardingChecklist: null,
   });
   const [assignedClasses, setAssignedClasses] = useState<ClassWithPeriod[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showChecklist, setShowChecklist] = useState<boolean>(true);
 
   // Teacher specific leaderboard filter
   const [selectedTeacherClassId, setSelectedTeacherClassId] = useState<string>('all');
@@ -238,6 +241,103 @@ const Dashboard: React.FC = () => {
               </div>
             )}
           </div>
+
+          {/* Dynamic 9-Step Onboarding Checklist for Administrator */}
+          {user?.role === 'admin' && stats.onboardingChecklist && (
+            <div className="bg-white rounded-xl shadow-xs border border-indigo-100 overflow-hidden">
+              <div className="p-5 bg-gradient-to-r from-indigo-50/70 via-white to-indigo-50/40 border-b border-indigo-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-indigo-600 text-white text-xs font-bold">
+                      {stats.onboardingChecklist.completedCount}
+                    </span>
+                    <h2 className="text-base font-bold text-gray-900">
+                      School Launch & Onboarding Checklist
+                    </h2>
+                    {stats.onboardingChecklist.isAllComplete ? (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">
+                        <CheckCircle2 className="w-3.5 h-3.5 mr-1 text-emerald-600" /> Complete & Ready
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800">
+                        {stats.onboardingChecklist.completedCount} of {stats.onboardingChecklist.totalSteps} Steps Complete
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Follow these foundational setup steps to ensure your school is fully configured for academic and financial operations.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <div className="w-32 hidden sm:block">
+                    <div className="w-full bg-gray-200 rounded-full h-2">
+                      <div
+                        className={`h-2 rounded-full transition-all duration-300 ${
+                          stats.onboardingChecklist.isAllComplete ? 'bg-emerald-500' : 'bg-indigo-600'
+                        }`}
+                        style={{ width: `${stats.onboardingChecklist.progressPercentage}%` }}
+                      />
+                    </div>
+                    <span className="text-[10px] text-gray-400 font-semibold block text-right mt-0.5">
+                      {stats.onboardingChecklist.progressPercentage}% Complete
+                    </span>
+                  </div>
+
+                  <button
+                    onClick={() => setShowChecklist(!showChecklist)}
+                    className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 px-2 py-1 rounded hover:bg-indigo-50 transition-colors"
+                  >
+                    {showChecklist ? 'Hide Checklist' : 'Show Checklist'}
+                  </button>
+                </div>
+              </div>
+
+              {showChecklist && (
+                <div className="p-5 grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {stats.onboardingChecklist.steps.map((step: any) => (
+                    <Link
+                      key={step.id}
+                      to={step.route}
+                      className={`p-3.5 rounded-lg border transition-all flex items-start gap-3 group ${
+                        step.isComplete
+                          ? 'bg-gray-50/60 border-gray-200 hover:bg-gray-50'
+                          : 'bg-indigo-50/30 border-indigo-200 hover:bg-indigo-50/70 hover:shadow-2xs'
+                      }`}
+                    >
+                      <div className="mt-0.5 flex-shrink-0">
+                        {step.isComplete ? (
+                          <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                        ) : (
+                          <div className="w-5 h-5 rounded-full border-2 border-indigo-400 flex items-center justify-center text-[10px] font-bold text-indigo-700 bg-white">
+                            {step.step}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between">
+                          <h4
+                            className={`text-xs font-bold truncate ${
+                              step.isComplete
+                                ? 'text-gray-700 line-through decoration-gray-400'
+                                : 'text-gray-900 group-hover:text-indigo-600'
+                            }`}
+                          >
+                            {step.title}
+                          </h4>
+                          <ChevronRight className="w-3.5 h-3.5 text-gray-400 group-hover:text-indigo-600 flex-shrink-0" />
+                        </div>
+                        <p className="text-[11px] text-gray-500 mt-0.5 line-clamp-2 leading-relaxed">
+                          {step.description}
+                        </p>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* TEACHER SECTION: COMPLETION PROGRESS & CLASS LEADERBOARD */}
           {user?.role === 'teacher' && (

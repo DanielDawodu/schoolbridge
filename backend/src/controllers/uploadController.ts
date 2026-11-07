@@ -56,3 +56,23 @@ export const uploadStudentPhoto = async (req: AuthRequest, res: Response): Promi
     res.status(500).json({ error: 'Internal server error' });
   }
 };
+
+export const uploadGeneralImage = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.file) {
+      res.status(400).json({ error: 'No image file uploaded' });
+      return;
+    }
+
+    // Convert image buffer to base64 data URI
+    const base64Image = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+    res.json({
+      url: base64Image,
+      photoUrl: base64Image,
+      logoUrl: base64Image,
+    });
+  } catch (error) {
+    console.error('Upload general image error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};

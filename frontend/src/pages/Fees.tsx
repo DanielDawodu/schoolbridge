@@ -17,6 +17,8 @@ import {
   ShieldAlert,
 } from 'lucide-react';
 import ClassSelectionGrid, { type ClassItem } from '../components/ClassSelectionGrid';
+import DocumentHeader from '../components/DocumentHeader';
+import { printElement } from '../utils/printHelper';
 import { amountToWords } from '../utils/numberToWords';
 
 interface ChargeItem {
@@ -1192,7 +1194,7 @@ export const Fees: React.FC = () => {
                     </label>
                     <input
                       type="text"
-                      placeholder="Optional note"
+                      placeholder="Enter additional information about this charge..."
                       value={charge.note}
                       onChange={(e) => handleUpdateChargeRow(charge.id, 'note', e.target.value)}
                       className="w-full text-xs border border-gray-300 rounded-lg p-2 bg-white focus:ring-2 focus:ring-indigo-500"
@@ -1432,7 +1434,7 @@ export const Fees: React.FC = () => {
               </div>
               <div className="flex items-center space-x-3">
                 <button
-                  onClick={() => window.print()}
+                  onClick={() => printElement('printable-receipt', `Receipt - ${currentReceipt.receiptNumber}`)}
                   className="inline-flex items-center px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-xs cursor-pointer"
                 >
                   <Printer className="w-3.5 h-3.5 mr-1.5" /> Print Receipt
@@ -1446,40 +1448,21 @@ export const Fees: React.FC = () => {
               </div>
             </div>
 
-            {/* A4 Printable Receipt Content (Lagos State University Style Layout) */}
+            {/* A4 Printable Receipt Content (Universal Document Branding) */}
             <div className="p-8 sm:p-10 text-gray-900 bg-white" id="printable-receipt">
-              {/* Header with School Branding */}
-              <div className="border-b-2 border-gray-900 pb-4 mb-6 text-center">
-                <h1 className="text-2xl font-black uppercase tracking-wider text-gray-900">
-                  {currentReceipt.school?.name || 'Ijebu-Ode Comprehensive College'}
-                </h1>
-                {currentReceipt.school?.address && (
-                  <p className="text-xs text-gray-600 mt-0.5">{currentReceipt.school.address}</p>
-                )}
-                <div className="inline-block mt-3 px-5 py-1 bg-gray-900 text-white font-black text-xs uppercase tracking-widest rounded-md">
-                  Official Student Fee Payment Receipt
-                </div>
-              </div>
-
-              {/* Receipt Number & Date Strip */}
-              <div className="flex items-center justify-between text-xs border border-gray-300 p-3 rounded-lg bg-gray-50/60 mb-6">
-                <div>
-                  <span className="text-gray-500 font-semibold uppercase">Receipt No: </span>
-                  <span className="font-mono font-black text-indigo-900 text-sm">
-                    {currentReceipt.receiptNumber}
-                  </span>
-                </div>
-                <div className="text-right">
-                  <span className="text-gray-500 font-semibold uppercase">Date: </span>
-                  <span className="font-bold">
-                    {new Date(currentReceipt.paidAt).toLocaleDateString('en-GB', {
-                      day: 'numeric',
-                      month: 'long',
-                      year: 'numeric',
-                    })}
-                  </span>
-                </div>
-              </div>
+              {/* Universal Header with School Branding */}
+              <DocumentHeader
+                title="Official Student Fee Payment Receipt"
+                documentNumber={currentReceipt.receiptNumber}
+                documentNumberLabel="Receipt No"
+                date={new Date(currentReceipt.paidAt).toLocaleDateString('en-GB', {
+                  day: 'numeric',
+                  month: 'long',
+                  year: 'numeric',
+                })}
+                sessionTerm={currentReceipt.termName}
+                schoolOverride={currentReceipt.school}
+              />
 
               {/* Student & Academic Particulars Table */}
               <div className="border border-gray-300 rounded-lg overflow-hidden mb-6">
@@ -1603,7 +1586,7 @@ export const Fees: React.FC = () => {
               <span className="text-sm font-bold">Official School Fee Invoice / Bill</span>
               <div className="flex items-center space-x-3">
                 <button
-                  onClick={() => window.print()}
+                  onClick={() => printElement('printable-bill', `Bill - ${billToPrint.invoice?.invoiceNumber}`)}
                   className="inline-flex items-center px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow-xs cursor-pointer"
                 >
                   <Printer className="w-3.5 h-3.5 mr-1.5" /> Print Bill
@@ -1619,33 +1602,22 @@ export const Fees: React.FC = () => {
 
             {/* A4 Printable Bill Content */}
             <div className="p-8 sm:p-12 text-gray-900 bg-white" id="printable-bill">
-              {/* Header */}
-              <div className="border-b-2 border-gray-900 pb-4 mb-6 text-center">
-                <h1 className="text-2xl font-black uppercase tracking-wider text-gray-900">
-                  {billToPrint.school?.name || 'Ijebu-Ode Comprehensive College'}
-                </h1>
-                {billToPrint.school?.address && (
-                  <p className="text-xs text-gray-600 mt-0.5">{billToPrint.school.address}</p>
-                )}
-                <div className="inline-block mt-3 px-5 py-1 bg-gray-900 text-white font-black text-xs uppercase tracking-widest rounded-md">
-                  Official School Fee Bill & Invoice
-                </div>
-              </div>
+              {/* Universal Header with School Branding */}
+              <DocumentHeader
+                title="Official School Fee Bill & Invoice"
+                documentNumber={billToPrint.invoice?.invoiceNumber}
+                documentNumberLabel="Bill / Invoice #"
+                date={new Date(billToPrint.invoice?.createdAt || Date.now()).toLocaleDateString('en-GB', {
+                  day: 'numeric',
+                  month: 'long',
+                  year: 'numeric',
+                })}
+                sessionTerm={(billToPrint as any).termName || (billToPrint as any).activeTerm?.name}
+                schoolOverride={billToPrint.school}
+              />
 
-              {/* Meta */}
-              <div className="grid grid-cols-2 gap-4 text-xs border border-gray-300 p-4 rounded-lg bg-gray-50/50 mb-6">
-                <div>
-                  <span className="text-gray-500 font-semibold uppercase">Bill / Invoice #: </span>
-                  <span className="font-mono font-black text-indigo-900">
-                    {billToPrint.invoice?.invoiceNumber}
-                  </span>
-                </div>
-                <div className="text-right">
-                  <span className="text-gray-500 font-semibold uppercase">Bill Date: </span>
-                  <span className="font-bold">
-                    {new Date(billToPrint.invoice?.createdAt || Date.now()).toLocaleDateString()}
-                  </span>
-                </div>
+              {/* Student & Class Meta */}
+              <div className="grid grid-cols-2 gap-4 text-xs border border-gray-300 p-3.5 rounded-lg bg-gray-50/50 mb-6">
                 <div>
                   <span className="text-gray-500 font-semibold uppercase">Student: </span>
                   <span className="font-bold text-gray-900">
@@ -1660,7 +1632,7 @@ export const Fees: React.FC = () => {
                 </div>
               </div>
 
-              {/* Itemised Breakdown */}
+              {/* Itemised Breakdown with Notes */}
               <div className="border border-gray-300 rounded-lg overflow-hidden mb-6">
                 <table className="min-w-full divide-y divide-gray-300 text-xs">
                   <thead className="bg-gray-100 font-bold uppercase text-gray-700">
@@ -1672,15 +1644,20 @@ export const Fees: React.FC = () => {
                   <tbody className="divide-y divide-gray-200">
                     {(billToPrint.invoice?.lineItems || []).map((item: any, idx: number) => (
                       <tr key={idx} className={item.isCarryover ? 'bg-amber-50/50' : ''}>
-                        <td className="px-4 py-2.5 font-medium">
-                          {item.name}
+                        <td className="px-4 py-2.5">
+                          <div className="font-semibold text-gray-900">{item.name}</div>
+                          {item.note && (
+                            <div className="text-[11px] text-gray-500 italic mt-0.5">
+                              {item.note}
+                            </div>
+                          )}
                           {item.isCarryover && (
-                            <span className="text-[10px] text-amber-800 font-bold ml-2">
+                            <span className="text-[10px] text-amber-800 font-bold inline-block mt-0.5">
                               (Previous Term Carryover)
                             </span>
                           )}
                         </td>
-                        <td className="px-4 py-2.5 text-right font-mono font-bold">
+                        <td className="px-4 py-2.5 text-right font-mono font-bold align-top">
                           ₦{item.amount.toLocaleString()}
                         </td>
                       </tr>

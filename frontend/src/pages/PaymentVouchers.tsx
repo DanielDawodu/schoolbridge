@@ -14,6 +14,8 @@ import {
   Trash2,
 } from 'lucide-react';
 import { amountToWords } from '../utils/numberToWords';
+import DocumentHeader from '../components/DocumentHeader';
+import { printElement } from '../utils/printHelper';
 
 export type VoucherCategory =
   | 'Teaching Staff Salary'
@@ -825,7 +827,12 @@ export const PaymentVouchers: React.FC = () => {
               </div>
               <div className="flex items-center space-x-3">
                 <button
-                  onClick={() => window.print()}
+                  onClick={() =>
+                    printElement(
+                      'printable-voucher',
+                      `Payment Voucher - ${printVoucher.voucherNumber}`
+                    )
+                  }
                   className="inline-flex items-center px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow-xs cursor-pointer"
                 >
                   <Printer className="w-3.5 h-3.5 mr-1.5" /> Print Voucher
@@ -841,37 +848,21 @@ export const PaymentVouchers: React.FC = () => {
 
             {/* A4 Voucher Printable Content */}
             <div className="p-8 sm:p-12 text-gray-900 bg-white" id="printable-voucher">
-              {/* School Header */}
-              <div className="border-b-2 border-gray-900 pb-5 mb-6 text-center">
-                <h1 className="text-2xl font-black uppercase tracking-wider text-gray-900">
-                  {schoolInfo?.name || 'Ijebu-Ode Comprehensive College'}
-                </h1>
-                {schoolInfo?.address && (
-                  <p className="text-xs text-gray-600 mt-1">{schoolInfo.address}</p>
-                )}
-                <div className="inline-block mt-3 px-4 py-1 bg-gray-900 text-white font-black text-sm uppercase tracking-widest rounded">
-                  Official Payment Voucher
-                </div>
-              </div>
+              {/* Universal Header with School Branding */}
+              <DocumentHeader
+                title="Official Expenditure Payment Voucher"
+                documentNumber={printVoucher.voucherNumber}
+                documentNumberLabel="Voucher No"
+                date={new Date(printVoucher.date).toLocaleDateString('en-GB', {
+                  day: 'numeric',
+                  month: 'long',
+                  year: 'numeric',
+                })}
+                schoolOverride={schoolInfo}
+              />
 
-              {/* Voucher Meta Strip */}
-              <div className="grid grid-cols-2 gap-4 mb-6 text-xs border border-gray-300 p-4 rounded-lg bg-gray-50/50">
-                <div>
-                  <span className="text-gray-500 font-semibold uppercase">Voucher Number: </span>
-                  <span className="font-mono font-black text-indigo-900 text-sm">
-                    {printVoucher.voucherNumber}
-                  </span>
-                </div>
-                <div className="text-right">
-                  <span className="text-gray-500 font-semibold uppercase">Date: </span>
-                  <span className="font-bold">
-                    {new Date(printVoucher.date).toLocaleDateString('en-GB', {
-                      day: 'numeric',
-                      month: 'long',
-                      year: 'numeric',
-                    })}
-                  </span>
-                </div>
+              {/* Voucher Category & Status Strip */}
+              <div className="grid grid-cols-2 gap-4 mb-6 text-xs border border-gray-300 p-3 rounded-lg bg-gray-50/50">
                 <div>
                   <span className="text-gray-500 font-semibold uppercase">Category: </span>
                   <span className="font-bold text-gray-800">{printVoucher.category}</span>
@@ -941,13 +932,13 @@ export const PaymentVouchers: React.FC = () => {
                 </table>
               </div>
 
-              {/* Signatures Area */}
-              <div className="grid grid-cols-3 gap-6 pt-12 mt-12 border-t-2 border-dashed border-gray-300 text-center text-xs">
+              {/* 4 Official Authorization Signatures */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-8 mt-8 border-t-2 border-dashed border-gray-300 text-center text-xs">
                 <div>
                   <div className="border-b border-gray-900 pb-1 mb-2 font-semibold">
                     {printVoucher.preparedBy?.name || 'Staff Member'}
                   </div>
-                  <p className="font-bold text-gray-700 uppercase">Prepared By</p>
+                  <p className="font-bold text-gray-700 uppercase text-[11px]">1. Prepared By</p>
                   <p className="text-[10px] text-gray-400 mt-0.5">
                     {new Date(printVoucher.preparedBy?.date || printVoucher.createdAt).toLocaleDateString()}
                   </p>
@@ -955,22 +946,30 @@ export const PaymentVouchers: React.FC = () => {
 
                 <div>
                   <div className="border-b border-gray-900 pb-1 mb-2 font-semibold min-h-[22px]">
+                    {printVoucher.approvedBy?.name ? 'Internal Audit / Bursar' : '_____________________'}
+                  </div>
+                  <p className="font-bold text-gray-700 uppercase text-[11px]">2. Verified By</p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">Audit Check & Stamp</p>
+                </div>
+
+                <div>
+                  <div className="border-b border-gray-900 pb-1 mb-2 font-semibold min-h-[22px]">
                     {printVoucher.approvedBy?.name || '_____________________'}
                   </div>
-                  <p className="font-bold text-gray-700 uppercase">Approved By (Principal/Admin)</p>
+                  <p className="font-bold text-gray-700 uppercase text-[11px]">3. Approved By</p>
                   <p className="text-[10px] text-gray-400 mt-0.5">
                     {printVoucher.approvedBy?.date
                       ? new Date(printVoucher.approvedBy.date).toLocaleDateString()
-                      : 'Date & Stamp'}
+                      : 'Principal Signature & Date'}
                   </p>
                 </div>
 
                 <div>
                   <div className="border-b border-gray-900 pb-1 mb-2 font-semibold min-h-[22px]">
-                    {printVoucher.paidBy?.name ? `Received / Disbursed` : '_____________________'}
+                    {printVoucher.paidBy?.name ? 'Disbursed / Confirmed' : '_____________________'}
                   </div>
-                  <p className="font-bold text-gray-700 uppercase">Received By (Payee Signature)</p>
-                  <p className="text-[10px] text-gray-400 mt-0.5">Signature & Date</p>
+                  <p className="font-bold text-gray-700 uppercase text-[11px]">4. Received By</p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">Payee Signature & Date</p>
                 </div>
               </div>
 

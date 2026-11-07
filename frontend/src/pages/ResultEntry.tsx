@@ -502,9 +502,29 @@ const ResultEntry: React.FC = () => {
     if (isCompleted && currentUser?.role !== 'admin') return false;
     if (currentUser?.role === 'admin') return true;
     if (currentUser?.role === 'teacher') {
-      const currentUserId = currentUser._id || currentUser.userId;
-      const assignedId = reg.assignedTeacherId?._id;
-      return assignedId?.toString() === currentUserId?.toString();
+      const currentUserId = (currentUser._id || currentUser.userId || '').toString();
+      const assignedId = typeof reg.assignedTeacherId === 'object' && reg.assignedTeacherId?._id
+        ? reg.assignedTeacherId._id.toString()
+        : reg.assignedTeacherId ? reg.assignedTeacherId.toString() : '';
+
+      // Direct assignment to subject
+      if (assignedId && assignedId === currentUserId) return true;
+
+      // Or teacher assigned to class
+      const userAssignedClasses = (currentUser.assignedClasses || []).map((c: any) =>
+        typeof c === 'object' && c._id ? c._id.toString() : c.toString()
+      );
+      const activeClassId = selectedClass?._id;
+      if (activeClassId && userAssignedClasses.includes(activeClassId.toString())) {
+        return true;
+      }
+
+      // If subject has no teacher assigned at all, class teacher or authorized teacher can enter
+      if (!assignedId && selectedClass?.assignedTeachers?.some((t: any) => (t._id || t).toString() === currentUserId)) {
+        return true;
+      }
+
+      return false;
     }
     return false;
   };
