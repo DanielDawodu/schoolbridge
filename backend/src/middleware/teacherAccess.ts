@@ -1,3 +1,4 @@
+import SubjectRegistration from '../models/SubjectRegistration';
 import { Response } from 'express';
 import { AuthRequest } from './auth';
 import { StaffRole } from '../models/User';
@@ -6,12 +7,13 @@ import ClassGroup from '../models/ClassGroup';
 import Student from '../models/Student';
 
 export const requireClassAccess = async (req: AuthRequest, res: Response, next: any): Promise<void> => {
-  if (req.user?.role === 'admin') {
+  // Admins and accountants have full access to school classes
+  if (req.user?.role === 'admin' || req.user?.role === 'accountant') {
     return next();
   }
 
   if (req.user?.role !== 'teacher') {
-    res.status(403).json({ error: 'Teacher access required' });
+    res.status(403).json({ error: 'Teacher or authorized staff access required' });
     return;
   }
 
@@ -23,7 +25,13 @@ export const requireClassAccess = async (req: AuthRequest, res: Response, next: 
     }
 
     const teacher = await User.findById(req.user.userId);
-    if (!teacher || !teacher.assignedClasses.includes(classId as any)) {
+    const assigned = (teacher?.assignedClasses || []).map((id: any) => id.toString());
+    const isSubjectTeacher = await SubjectRegistration.exists({
+      schoolId: req.user?.schoolId,
+      classId,
+      assignedTeacherId: req.user?.userId,
+    });
+    if (!assigned.includes(classId.toString()) && !isSubjectTeacher) {
       res.status(403).json({ error: 'Access denied: You are not assigned to this class' });
       return;
     }
@@ -36,12 +44,13 @@ export const requireClassAccess = async (req: AuthRequest, res: Response, next: 
 };
 
 export const requireStudentAccess = async (req: AuthRequest, res: Response, next: any): Promise<void> => {
-  if (req.user?.role === 'admin') {
+  // Admins and accountants have full access to students
+  if (req.user?.role === 'admin' || req.user?.role === 'accountant') {
     return next();
   }
 
   if (req.user?.role !== 'teacher') {
-    res.status(403).json({ error: 'Teacher access required' });
+    res.status(403).json({ error: 'Teacher or authorized staff access required' });
     return;
   }
 
@@ -72,12 +81,12 @@ export const requireStudentAccess = async (req: AuthRequest, res: Response, next
 };
 
 export const requireAdminOrTeacherForClass = async (req: AuthRequest, res: Response, next: any): Promise<void> => {
-  if (req.user?.role === 'admin') {
+  if (req.user?.role === 'admin' || req.user?.role === 'accountant') {
     return next();
   }
 
   if (req.user?.role !== 'teacher') {
-    res.status(403).json({ error: 'Teacher access required' });
+    res.status(403).json({ error: 'Teacher or authorized staff access required' });
     return;
   }
 

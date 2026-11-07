@@ -5,8 +5,8 @@ import { StaffRole } from '../models/User';
 // Admin has full access (override all checks)
 const ROLE_PERMISSIONS: Record<StaffRole, string[]> = {
   admin: ['*'], // Full access to everything
-  teacher: ['attendance', 'students'], // Can access attendance and students (scoped to assigned classes)
-  accountant: ['fees'], // Can access fees module only
+  teacher: ['attendance', 'students', 'classes', 'results'], // Can access assigned classes, students & results
+  accountant: ['fees', 'classes', 'students', 'vouchers'], // Can access fees, classes, students & vouchers
   bookshop: [], // No functional permissions yet (role exists for future)
 };
 
@@ -16,6 +16,7 @@ export const MODULES = {
   CLASSES: 'classes',
   ATTENDANCE: 'attendance',
   FEES: 'fees',
+  VOUCHERS: 'vouchers',
   MIGRATION: 'migration',
   SETTINGS: 'settings',
   TEACHERS: 'teachers',
@@ -82,6 +83,16 @@ export const requireTeacherOrAdmin = (req: any, res: Response, next: NextFunctio
 export const requireAccountantOrAdmin = (req: any, res: Response, next: NextFunction) => {
   if (!req.user || (req.user.role !== 'accountant' && req.user.role !== 'admin')) {
     return res.status(403).json({ error: 'Accountant or admin access required' });
+  }
+  next();
+};
+
+/**
+ * Middleware to require staff role (admin, teacher, accountant)
+ */
+export const requireStaffOrAdmin = (req: any, res: Response, next: NextFunction) => {
+  if (!req.user || !['admin', 'teacher', 'accountant'].includes(req.user.role)) {
+    return res.status(403).json({ error: 'Staff access required' });
   }
   next();
 };

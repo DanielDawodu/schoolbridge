@@ -11,6 +11,7 @@
     "seed": "ts-node src/seed.ts",
     "migrate": "ts-node src/migrations/migrateToSessionTermPeriod.ts",
     "backup": "ts-node src/scripts/backupCollections.ts",
+    "restore": "ts-node src/scripts/restoreBackup.ts",
     "dry-run-migration": "ts-node src/scripts/runDryRunMigration.ts",
     "cleanup-test": "ts-node src/scripts/cleanupTest.ts",
     "live-migration": "ts-node src/scripts/runLiveMigration.ts",

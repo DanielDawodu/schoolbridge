@@ -5,7 +5,8 @@ export interface ISubject extends Document {
   name: string;
   code: string;
   category: 'core' | 'elective';
-  stream?: string; // For SSS electives (e.g., 'Science', 'Arts', 'Commercial')
+  stream?: string; // For SSS electives / factions (e.g., 'Science', 'Arts', 'Commercial')
+  applicableClassIds?: mongoose.Types.ObjectId[]; // Specific classes offering this subject
   isCompulsory: boolean;
   ca1Weight: number;
   ca2Weight: number;
@@ -39,6 +40,12 @@ const SubjectSchema: Schema = new Schema({
     type: String,
     trim: true,
   },
+  applicableClassIds: [
+    {
+      type: Schema.Types.ObjectId,
+      ref: 'ClassGroup',
+    },
+  ],
   isCompulsory: {
     type: Boolean,
     default: true,

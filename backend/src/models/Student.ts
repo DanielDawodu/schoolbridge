@@ -16,6 +16,7 @@ export interface IStudent extends Document {
   statusReason?: string;
   migrationBatchId?: mongoose.Types.ObjectId;
   photoUrl?: string;
+  stream?: string; // Faction / Stream (e.g. 'Science', 'Arts', 'Commercial')
   createdAt: Date;
   updatedAt: Date;
 }
@@ -79,6 +80,10 @@ const StudentSchema: Schema = new Schema({
   },
   photoUrl: {
     type: String,
+  },
+  stream: {
+    type: String,
+    trim: true,
   },
   createdAt: {
     type: Date,

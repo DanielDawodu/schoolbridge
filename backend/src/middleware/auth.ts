@@ -8,6 +8,8 @@ export interface AuthRequest extends Request {
     userId: string;
     schoolId: string;
     role: string;
+    name?: string;
+    email?: string;
     assignedClasses?: any[];
   };
 }
@@ -41,6 +43,8 @@ export const verifyToken = async (req: AuthRequest, res: Response, next: NextFun
       userId: decoded.userId,
       schoolId: decoded.schoolId,
       role: decoded.role,
+      name: user.name,
+      email: user.email,
       assignedClasses: user.assignedClasses || [],
     };
     next();

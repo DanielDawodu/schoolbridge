@@ -1,7 +1,7 @@
 import express from 'express';
 import { authenticate } from '../middleware/auth';
 import { requireAdmin } from '../middleware/permissions';
-import { uploadStaffPhoto, uploadStudentPhoto } from '../controllers/uploadController';
+import { uploadStaffPhoto, uploadStudentPhoto, uploadGeneralImage } from '../controllers/uploadController';
 import multer from 'multer';
 
 const router = express.Router();
@@ -11,20 +11,25 @@ const storage = multer.memoryStorage();
 const upload = multer({
   storage,
   limits: {
-    fileSize: 1 * 1024 * 1024, // 1MB limit (photos are now resized client-side)
+    fileSize: 2 * 1024 * 1024, // 2MB limit
   },
   fileFilter: (req, file, cb) => {
-    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif'];
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
     if (allowedTypes.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error('Only JPEG, PNG, and GIF images are allowed'));
+      cb(new Error('Only JPEG, PNG, WEBP, and GIF images are allowed'));
     }
   },
 });
 
-// All routes require authentication and admin role
+// All routes require authentication
 router.use(authenticate);
+
+// Upload generic image (branding logo, pre-registration photo) - available to staff & admin
+router.post('/image', upload.single('image'), uploadGeneralImage);
+
+// Admin-restricted routes
 router.use(requireAdmin);
 
 // Upload staff photo

@@ -11,6 +11,7 @@ export interface IUser extends Document {
   assignedClasses: mongoose.Types.ObjectId[];
   status: 'active' | 'inactive';
   temporaryPassword?: string;
+  mustChangePassword?: boolean;
   photoUrl?: string;
   createdAt: Date;
 }
@@ -54,6 +55,10 @@ const UserSchema: Schema = new Schema({
   temporaryPassword: {
     type: String,
   },
+  mustChangePassword: {
+    type: Boolean,
+    default: false,
+  },
   photoUrl: {
     type: String,
   },
@@ -63,4 +68,4 @@ const UserSchema: Schema = new Schema({
   },
 });
 
-export default mongoose.model<IUser>('User', UserSchema);
+export default mongoose.models.User || mongoose.model<IUser>('User', UserSchema);

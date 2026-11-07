@@ -1,10 +1,13 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
+export type AcademicFaction = 'Science' | 'Arts' | 'Commercial';
+
 export interface IClassGroup extends Document {
   schoolId: mongoose.Types.ObjectId;
   classLevelId: mongoose.Types.ObjectId;
   arm: string;
   periodId: mongoose.Types.ObjectId;
+  faction?: AcademicFaction | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -29,6 +32,11 @@ const ClassGroupSchema: Schema = new Schema({
     type: Schema.Types.ObjectId,
     ref: 'Period',
     required: true,
+  },
+  faction: {
+    type: String,
+    enum: ['Science', 'Arts', 'Commercial', null],
+    default: null,
   },
   createdAt: {
     type: Date,

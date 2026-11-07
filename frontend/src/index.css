@@ -1,3 +1,52 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@media print {
+  /* Hide application chrome, navbar, sidebar, action buttons, modals and overlays */
+  nav,
+  aside,
+  header,
+  button,
+  .print\:hidden,
+  .no-print,
+  [data-no-print="true"] {
+    display: none !important;
+  }
+
+  body {
+    background: #ffffff !important;
+    color: #111827 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Flatten modal containers so backdrops and fixed positioning disappear in print */
+  .fixed.inset-0 {
+    position: static !important;
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+  }
+
+  /* Expand printable paper targets */
+  #printable-receipt,
+  #printable-bill,
+  #printable-voucher,
+  #printable-report,
+  .printable-document {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+    display: block !important;
+  }
+
+  @page {
+    size: A4;
+    margin: 10mm 12mm;
+  }
+}

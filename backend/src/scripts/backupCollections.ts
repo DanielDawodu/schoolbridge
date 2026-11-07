@@ -9,27 +9,40 @@ const MONGODB_URI = process.env.MONGODB_URI || '';
 const BACKUP_DIR = path.join(__dirname, '../../backups');
 
 const COLLECTIONS = [
-  'academicsessions',
-  'classgroups',
-  'studentresults',
-  'subjectregistrations',
-  'attendances',
-  'feeinvoices',
-  'billtemplates',
   'schools',
   'users',
   'students',
+  'classlevels',
+  'classgroups',
+  'subjects',
+  'subjectregistrations',
+  'studentresults',
+  'periods',
+  'sessions',
+  'terms',
+  'academicsessions',
+  'attendances',
+  'billtemplates',
+  'feeinvoices',
+  'feepayments',
+  'paymentvouchers',
+  'auditlogs',
 ];
 
-async function backupCollection(collectionName: string): Promise<void> {
+async function backupCollection(collectionName: string, timestampDir: string): Promise<number> {
   try {
     const collection = mongoose.connection.collection(collectionName);
     const documents = await collection.find({}).toArray();
 
-    const backupPath = path.join(BACKUP_DIR, `${collectionName}.json`);
+    const backupPath = path.join(timestampDir, `${collectionName}.json`);
     fs.writeFileSync(backupPath, JSON.stringify(documents, null, 2));
 
-    console.log(`✓ Backed up ${collectionName}: ${documents.length} documents`);
+    // Also update the 'latest' snapshot for quick access
+    const latestPath = path.join(BACKUP_DIR, 'latest', `${collectionName}.json`);
+    fs.writeFileSync(latestPath, JSON.stringify(documents, null, 2));
+
+    console.log(`✓ Backed up ${collectionName}: ${documents.length} records`);
+    return documents.length;
   } catch (error) {
     console.error(`✗ Failed to backup ${collectionName}:`, error);
     throw error;
@@ -38,26 +51,46 @@ async function backupCollection(collectionName: string): Promise<void> {
 
 async function runBackup(): Promise<void> {
   try {
-    console.log('Starting backup...');
-    console.log(`MongoDB URI: ${MONGODB_URI.substring(0, 30)}...`);
-    console.log(`Backup directory: ${BACKUP_DIR}`);
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const timestampDir = path.join(BACKUP_DIR, `snapshot-${timestamp}`);
+    const latestDir = path.join(BACKUP_DIR, 'latest');
 
-    // Create backup directory if it doesn't exist
-    if (!fs.existsSync(BACKUP_DIR)) {
-      fs.mkdirSync(BACKUP_DIR, { recursive: true });
+    console.log('--- SCHOOLBRIDGE AUTOMATED BACKUP ---');
+    console.log(`Timestamp: ${new Date().toISOString()}`);
+    console.log(`Backup Destination: ${timestampDir}`);
+
+    if (!fs.existsSync(timestampDir)) {
+      fs.mkdirSync(timestampDir, { recursive: true });
+    }
+    if (!fs.existsSync(latestDir)) {
+      fs.mkdirSync(latestDir, { recursive: true });
     }
 
-    // Connect to MongoDB
+    if (!MONGODB_URI) {
+      throw new Error('MONGODB_URI environment variable is not defined.');
+    }
+
     await mongoose.connect(MONGODB_URI);
-    console.log('✓ Connected to MongoDB');
+    console.log('✓ Database connection established');
 
-    // Backup each collection
+    const manifest: Record<string, any> = {
+      backupTimestamp: new Date().toISOString(),
+      collections: {},
+    };
+
+    let totalRecords = 0;
     for (const collection of COLLECTIONS) {
-      await backupCollection(collection);
+      const count = await backupCollection(collection, timestampDir);
+      manifest.collections[collection] = count;
+      totalRecords += count;
     }
 
-    console.log('\n✓ Backup complete!');
-    console.log(`Backup location: ${BACKUP_DIR}`);
+    manifest.totalRecords = totalRecords;
+    fs.writeFileSync(path.join(timestampDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
+    fs.writeFileSync(path.join(latestDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
+
+    console.log(`\n✓ Backup completed successfully! Total records backed up: ${totalRecords}`);
+    console.log(`Manifest written to: ${path.join(timestampDir, 'manifest.json')}`);
   } catch (error) {
     console.error('Backup failed:', error);
     process.exit(1);

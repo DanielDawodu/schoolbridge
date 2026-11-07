@@ -14,23 +14,61 @@ import {
   getBillTemplate,
   deleteBillTemplate,
   applyBillTemplate,
+  getClassBillingSummary,
+  getClassBillingPreview,
+  generateClassBill,
+  getClassInvoices,
+  getInvoiceDetail,
+  getReceiptDetail,
+  verifyReceiptPublic,
+  reversePayment,
+  getClassPaymentReports,
 } from '../controllers/feesController';
 
 const router = express.Router();
 
-// All routes require authentication
-router.use(authenticate);
+// =========================================================================
+// PUBLIC ROUTES (No Authentication Required for QR Verification)
+// =========================================================================
+router.get('/public/verify-receipt/:verificationCode', verifyReceiptPublic);
 
-// All fees routes require accountant or admin role
+// =========================================================================
+// AUTHENTICATED ROUTES (Admin or Accountant Role Required)
+// =========================================================================
+router.use(authenticate);
 router.use(requireAccountantOrAdmin);
 
-// Create invoice
+// Class billing summary for active term
+router.get('/classes-summary', getClassBillingSummary);
+
+// Preview class billing with automated carryover
+router.get('/class-preview', getClassBillingPreview);
+
+// Generate class-wide bill with tuition, additional charges, and carryover
+router.post('/generate-class-bill', generateClassBill);
+
+// Class invoices list
+router.get('/class-invoices', getClassInvoices);
+
+// Single invoice detail with payment history and branding for printing
+router.get('/invoice-detail/:invoiceId', getInvoiceDetail);
+
+// Payment receipt detail for printing/reprinting
+router.get('/receipts/:paymentId', getReceiptDetail);
+
+// Reverse / void payment with audit trail
+router.post('/payments/:paymentId/reverse', reversePayment);
+
+// Payment reports (Fully Paid Students & Debtors List)
+router.get('/class-reports', getClassPaymentReports);
+
+// Create single invoice (manual)
 router.post('/invoices', createInvoice);
 
 // Delete invoice
 router.delete('/invoices/:invoiceId', deleteInvoice);
 
-// Record payment
+// Record payment (generates unique receipt & QR verification)
 router.post('/payments', recordPayment);
 
 // Delete payment

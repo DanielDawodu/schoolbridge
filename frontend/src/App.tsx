@@ -11,6 +11,8 @@ import Students from './pages/Students';
 import Classes from './pages/Classes';
 import Staff from './pages/Staff';
 import Settings from './pages/Settings';
+import Branding from './pages/Branding';
+import GradingSystem from './pages/GradingSystem';
 import Migration from './pages/Migration';
 import Attendance from './pages/Attendance';
 import Fees from './pages/Fees';
@@ -20,6 +22,8 @@ import SubjectRegistration from './pages/SubjectRegistration';
 import ResultEntry from './pages/ResultEntry';
 import ReportCard from './pages/ReportCard';
 import HalfTermReport from './pages/HalfTermReport';
+import PaymentVouchers from './pages/PaymentVouchers';
+import VerifyReceipt from './pages/VerifyReceipt';
 
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -104,159 +108,193 @@ function App() {
   return (
     <ErrorBoundary>
       <AuthProvider>
-      <Router>
-        <Routes>
-          <Route
-            path="/login"
-            element={
-              <PublicRoute>
-                <Login />
-              </PublicRoute>
-            }
-          />
-          <Route
-            path="/signup"
-            element={
-              <PublicRoute>
-                <Signup />
-              </PublicRoute>
-            }
-          />
-          <Route
-            path="/dashboard"
-            element={
-              <ProtectedRoute>
-                <Dashboard />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/students"
-            element={
-              <ProtectedRoute>
-                <Students />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/classes"
-            element={
-              <ProtectedRoute>
-                <Classes />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/staff"
-            element={
-              <ProtectedRoute>
-                <AdminOnlyRoute>
-                  <Staff />
-                </AdminOnlyRoute>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/settings"
-            element={
-              <ProtectedRoute>
-                <AdminOnlyRoute>
-                  <Settings />
-                </AdminOnlyRoute>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/migration"
-            element={
-              <ProtectedRoute>
-                <AdminOnlyRoute>
-                  <Migration />
-                </AdminOnlyRoute>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/promotion"
-            element={
-              <ProtectedRoute>
-                <AdminOnlyRoute>
-                  <Promotion />
-                </AdminOnlyRoute>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/subjects"
-            element={
-              <ProtectedRoute>
-                <AdminOnlyRoute>
-                  <Subjects />
-                </AdminOnlyRoute>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/subject-registration"
-            element={
-              <ProtectedRoute>
-                <AdminOnlyRoute>
-                  <SubjectRegistration />
-                </AdminOnlyRoute>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/result-entry"
-            element={
-              <ProtectedRoute>
-                <ResultEntry />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/report-cards"
-            element={
-              <ProtectedRoute>
-                <AdminOnlyRoute>
-                  <ReportCard />
-                </AdminOnlyRoute>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/half-term-report"
-            element={
-              <ProtectedRoute>
-                <AdminOnlyRoute>
-                  <HalfTermReport />
-                </AdminOnlyRoute>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/attendance"
-            element={
-              <ProtectedRoute>
-                <Attendance />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/fees"
-            element={
-              <ProtectedRoute>
-                <AccountantOrAdminRoute>
-                  <Fees />
-                </AccountantOrAdminRoute>
-              </ProtectedRoute>
-            }
-          />
-          <Route path="/" element={<Navigate to="/dashboard" />} />
-        </Routes>
-      </Router>
-    </AuthProvider>
-  </ErrorBoundary>
+        <Router>
+          <Routes>
+            <Route
+              path="/login"
+              element={
+                <PublicRoute>
+                  <Login />
+                </PublicRoute>
+              }
+            />
+            <Route
+              path="/signup"
+              element={
+                <PublicRoute>
+                  <Signup />
+                </PublicRoute>
+              }
+            />
+            <Route
+              path="/dashboard"
+              element={
+                <ProtectedRoute>
+                  <Dashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/students"
+              element={
+                <ProtectedRoute>
+                  <Students />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/classes"
+              element={
+                <ProtectedRoute>
+                  <Classes />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/staff"
+              element={
+                <ProtectedRoute>
+                  <AdminOnlyRoute>
+                    <Staff />
+                  </AdminOnlyRoute>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/settings"
+              element={
+                <ProtectedRoute>
+                  <AdminOnlyRoute>
+                    <Settings />
+                  </AdminOnlyRoute>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/settings/branding"
+              element={
+                <ProtectedRoute>
+                  <AdminOnlyRoute>
+                    <Branding />
+                  </AdminOnlyRoute>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/settings/grading"
+              element={
+                <ProtectedRoute>
+                  <AdminOnlyRoute>
+                    <GradingSystem />
+                  </AdminOnlyRoute>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/migration"
+              element={
+                <ProtectedRoute>
+                  <AdminOnlyRoute>
+                    <Migration />
+                  </AdminOnlyRoute>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/promotion"
+              element={
+                <ProtectedRoute>
+                  <AdminOnlyRoute>
+                    <Promotion />
+                  </AdminOnlyRoute>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/subjects"
+              element={
+                <ProtectedRoute>
+                  <AdminOnlyRoute>
+                    <Subjects />
+                  </AdminOnlyRoute>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/subject-registration"
+              element={
+                <ProtectedRoute>
+                  <AdminOnlyRoute>
+                    <SubjectRegistration />
+                  </AdminOnlyRoute>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/result-entry"
+              element={
+                <ProtectedRoute>
+                  <ResultEntry />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/report-cards"
+              element={
+                <ProtectedRoute>
+                  <AdminOnlyRoute>
+                    <ReportCard />
+                  </AdminOnlyRoute>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/half-term-report"
+              element={
+                <ProtectedRoute>
+                  <AdminOnlyRoute>
+                    <HalfTermReport />
+                  </AdminOnlyRoute>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/attendance"
+              element={
+                <ProtectedRoute>
+                  <Attendance />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/fees"
+              element={
+                <ProtectedRoute>
+                  <AccountantOrAdminRoute>
+                    <Fees />
+                  </AccountantOrAdminRoute>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/verify-receipt/:verificationCode"
+              element={<VerifyReceipt />}
+            />
+            <Route
+              path="/payment-vouchers"
+              element={
+                <ProtectedRoute>
+                  <AccountantOrAdminRoute>
+                    <PaymentVouchers />
+                  </AccountantOrAdminRoute>
+                </ProtectedRoute>
+              }
+            />
+            <Route path="/" element={<Navigate to="/dashboard" />} />
+          </Routes>
+        </Router>
+      </AuthProvider>
+    </ErrorBoundary>
   );
 }
 

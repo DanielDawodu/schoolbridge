@@ -1,6 +1,10 @@
 import { Response } from 'express';
 import SubjectRegistration from '../models/SubjectRegistration';
 import Subject from '../models/Subject';
+import Period from '../models/Period';
+import Student from '../models/Student';
+import ClassGroup from '../models/ClassGroup';
+import School from '../models/School';
 import { AuthRequest } from '../middleware/auth';
 import { addSchoolFilter } from '../middleware/multiTenant';
 
@@ -99,27 +103,128 @@ export const getStudentSubjects = async (req: AuthRequest, res: Response): Promi
   try {
     const { sessionId, studentId, classId } = req.query;
 
-    if (!sessionId || !studentId) {
-      res.status(400).json({ error: 'Session ID and student ID are required' });
+    if (!studentId && !classId) {
+      res.status(400).json({ error: 'Either student ID or class ID must be provided' });
       return;
     }
 
-    const orConditions: any[] = [{ studentId }];
-    if (classId) {
-      orConditions.push({ classId });
+    // Determine student context, class and faction
+    let student: any = null;
+    let targetClassId: string = (classId as string) || '';
+    let studentFaction: string | null = null;
+
+    if (studentId) {
+      student = await Student.findOne(addSchoolFilter(req, { _id: studentId })).populate('classId');
+      if (student) {
+        if (!targetClassId && student.classId) {
+          targetClassId = (student.classId?._id || student.classId).toString();
+        }
+        studentFaction = student.stream || (student.classId as any)?.faction || null;
+      }
     }
 
-    const filter = addSchoolFilter(req, {
-      sessionId,
-      $or: orConditions,
-    });
+    if (!studentFaction && targetClassId) {
+      const cls = await ClassGroup.findById(targetClassId);
+      if (cls?.faction) {
+        studentFaction = cls.faction;
+      }
+    }
 
-    const registrations = await SubjectRegistration.find(filter)
+    let sessionIds: any[] = [];
+    if (sessionId) {
+      const sessionStr = String(sessionId);
+      sessionIds.push(sessionStr);
+      try {
+        const period: any = await Period.findOne({ _id: sessionStr } as any);
+        if (period) {
+          sessionIds.push(period.sessionId);
+        } else {
+          const periods: any[] = await Period.find({ sessionId: sessionStr } as any);
+          periods.forEach((p) => sessionIds.push(p._id));
+        }
+      } catch {
+        // Ignore casting errors
+      }
+    } else {
+      const school = await School.findById(req.user?.schoolId);
+      if (school?.activePeriodId) {
+        sessionIds.push(school.activePeriodId);
+      }
+    }
+
+    const orConditions: any[] = [];
+    if (studentId) orConditions.push({ studentId });
+    if (targetClassId) orConditions.push({ classId: targetClassId });
+
+    let filter: any = addSchoolFilter(req);
+    if (sessionIds.length > 0) {
+      filter.sessionId = { $in: sessionIds };
+    }
+    if (orConditions.length > 0) {
+      filter.$or = orConditions;
+    }
+
+    let registrations = await SubjectRegistration.find(filter)
       .populate('subjectId')
       .populate('assignedTeacherId')
       .sort({ subjectId: 1 });
 
-    res.json(registrations);
+    // Fallback 1: check class or student across all sessions
+    if (registrations.length === 0 && (targetClassId || studentId)) {
+      registrations = await SubjectRegistration.find(
+        addSchoolFilter(req, {
+          $or: orConditions,
+        })
+      )
+        .populate('subjectId')
+        .populate('assignedTeacherId')
+        .sort({ subjectId: 1 });
+    }
+
+    // Fallback 2: load active school subjects
+    if (registrations.length === 0) {
+      const allSubjects = await Subject.find(addSchoolFilter(req)).sort({ name: 1 });
+      registrations = allSubjects.map((s) => ({
+        _id: s._id,
+        subjectId: s,
+        assignedTeacherId: null,
+      })) as any;
+    }
+
+    // Filter registrations by class assignment and faction/stream
+    const filtered = registrations.filter((reg: any) => {
+      const subj: any = reg.subjectId;
+      if (!subj) return false;
+
+      // 1. If subject specifies applicable classes, ensure targetClassId is included
+      if (
+        targetClassId &&
+        subj.applicableClassIds &&
+        Array.isArray(subj.applicableClassIds) &&
+        subj.applicableClassIds.length > 0
+      ) {
+        const hasClass = subj.applicableClassIds.some(
+          (cId: any) => cId.toString() === targetClassId.toString()
+        );
+        if (!hasClass) return false;
+      }
+
+      // 2. If subject has an academic faction/stream (Science, Arts, Commercial)
+      if (subj.stream && subj.stream.trim()) {
+        const subjStream = subj.stream.trim().toLowerCase();
+        // If student/class has no faction (e.g. JSS or Primary), do not include SSS faction electives
+        if (!studentFaction) {
+          return false;
+        }
+        if (studentFaction.toLowerCase() !== subjStream) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+
+    res.json(filtered);
   } catch (error) {
     console.error('Get student subjects error:', error);
     res.status(500).json({ error: 'Internal server error' });
