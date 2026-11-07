@@ -13,8 +13,8 @@ export const getSchool = async (req: AuthRequest, res: Response): Promise<void> 
       path: 'activePeriodId',
       populate: [
         { path: 'sessionId', select: 'year' },
-        { path: 'termId', select: 'name' }
-      ]
+        { path: 'termId', select: 'name' },
+      ],
     });
     if (!school) {
       res.status(404).json({ error: 'School not found' });
@@ -26,7 +26,9 @@ export const getSchool = async (req: AuthRequest, res: Response): Promise<void> 
       const activePeriod = await Period.findOne({
         schoolId: req.user?.schoolId,
         isActive: true,
-      }).populate('sessionId', 'year').populate('termId', 'name');
+      })
+        .populate('sessionId', 'year')
+        .populate('termId', 'name');
 
       if (activePeriod) {
         schoolObj.activePeriodId = activePeriod;
@@ -39,13 +41,128 @@ export const getSchool = async (req: AuthRequest, res: Response): Promise<void> 
         examMax: 60,
         midtermMax: 40,
         ca1Max: 20,
-        ca2Max: 20
+        ca2Max: 20,
       };
     }
 
     res.json(schoolObj);
   } catch (error) {
     console.error('Get school error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+/**
+ * Get active academic session and period configuration for the authenticated user's school.
+ * Used centrally by Result Entry, Half Term Report, Fees, Report Cards and Billings.
+ */
+export const getActivePeriod = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const schoolId = req.user?.schoolId;
+    if (!schoolId) {
+      res.status(401).json({ error: 'Unauthorized: No school associated with user' });
+      return;
+    }
+
+    const school = await School.findById(schoolId);
+    if (!school) {
+      res.status(404).json({ error: 'School not found' });
+      return;
+    }
+
+    let activePeriod: any = null;
+
+    // 1. Check if school has explicit activePeriodId
+    if (school.activePeriodId) {
+      activePeriod = await Period.findOne({
+        _id: school.activePeriodId,
+        schoolId,
+      })
+        .populate('sessionId')
+        .populate('termId');
+    }
+
+    // 2. Check if any period has isActive: true
+    if (!activePeriod) {
+      activePeriod = await Period.findOne({
+        schoolId,
+        isActive: true,
+      })
+        .populate('sessionId')
+        .populate('termId');
+    }
+
+    // 3. Fallback to latest Period for this school and activate it
+    if (!activePeriod) {
+      activePeriod = await Period.findOne({ schoolId })
+        .sort({ createdAt: -1 })
+        .populate('sessionId')
+        .populate('termId');
+
+      if (activePeriod) {
+        await Period.findByIdAndUpdate(activePeriod._id, { isActive: true });
+        await School.findByIdAndUpdate(schoolId, { activePeriodId: activePeriod._id });
+      }
+    }
+
+    let sessionObj: any = null;
+    let periodObj: any = null;
+    let year = '2026/2027';
+    let termName = '1st Term';
+
+    if (activePeriod) {
+      periodObj = activePeriod;
+      const sRec = activePeriod.sessionId;
+      const tRec = activePeriod.termId;
+      year = (sRec as any)?.year || year;
+      termName = (tRec as any)?.name || termName;
+
+      sessionObj = {
+        _id: (sRec as any)?._id || sRec,
+        year,
+        currentTerm: termName,
+        name: `${year} - ${termName}`,
+      };
+    } else {
+      // 4. Fallback to AcademicSession if periods have not been migrated yet
+      let academicSession: any = null;
+      if (school.activeTermId) {
+        academicSession = await AcademicSession.findOne({ _id: school.activeTermId, schoolId });
+      }
+      if (!academicSession) {
+        academicSession = await AcademicSession.findOne({ schoolId }).sort({ createdAt: -1 });
+      }
+
+      if (academicSession) {
+        sessionObj = academicSession;
+        year = academicSession.year;
+        termName = academicSession.currentTerm;
+      }
+    }
+
+    const hasActivePeriod = Boolean(periodObj || sessionObj);
+
+    const schoolObj: any = school.toObject();
+    if (!schoolObj.assessmentConfig) {
+      schoolObj.assessmentConfig = {
+        examMax: 60,
+        midtermMax: 40,
+        ca1Max: 20,
+        ca2Max: 20,
+      };
+    }
+
+    res.json({
+      hasActivePeriod,
+      school: schoolObj,
+      period: periodObj,
+      session: sessionObj,
+      termId: periodObj?.termId?._id || sessionObj?._id || periodObj?._id,
+      sessionId: periodObj?.sessionId?._id || sessionObj?._id || periodObj?._id,
+      name: `${year} - ${termName}`,
+    });
+  } catch (error) {
+    console.error('Get active period error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 };

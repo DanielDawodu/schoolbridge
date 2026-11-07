@@ -52,7 +52,18 @@ export const getClasses = async (req: AuthRequest, res: Response): Promise<void>
       }).distinct('classId');
       const subjectClassIds = subjectRegistrations.map((id: any) => id.toString());
       const allTeacherClassIds = Array.from(new Set([...assignedClassIds, ...subjectClassIds]));
-      filter._id = { $in: allTeacherClassIds };
+
+      // If teacher has no assigned classes or subjects, return empty list cleanly
+      if (allTeacherClassIds.length === 0) {
+        res.json([]);
+        return;
+      }
+
+      const validObjectIds = allTeacherClassIds
+        .filter((id) => mongoose.Types.ObjectId.isValid(id))
+        .map((id) => new mongoose.Types.ObjectId(id));
+
+      filter._id = { $in: validObjectIds };
     }
 
     if (periodId) {
@@ -65,13 +76,12 @@ export const getClasses = async (req: AuthRequest, res: Response): Promise<void>
       .populate('periodId')
       .sort({ classLevelId: 1, arm: 1 });
 
-    const classIds = classes.map(c => c._id);
+    const classIds = classes.map((c) => c._id);
 
     // Find teachers with assignedClasses
     const teachers = await User.find({
       schoolId: req.user?.schoolId,
       role: 'teacher',
-      assignedClasses: { $in: classIds },
     }).select('name fullName assignedClasses');
 
     // Also find teachers from SubjectRegistration
@@ -81,16 +91,22 @@ export const getClasses = async (req: AuthRequest, res: Response): Promise<void>
       assignedTeacherId: { $exists: true, $ne: null },
     }).populate('assignedTeacherId', 'name fullName');
 
-    // Count active students per class
-    const studentCounts = await Student.aggregate([
-      { $match: { schoolId: new mongoose.Types.ObjectId(req.user?.schoolId), classId: { $in: classIds }, status: { $ne: 'inactive' } } },
-      { $group: { _id: '$classId', count: { $sum: 1 } } },
-    ]);
-
+    // Count active students per class safely using countDocuments
     const studentCountMap = new Map<string, number>();
-    studentCounts.forEach((sc: any) => studentCountMap.set(sc._id.toString(), sc.count));
+    for (const c of classes) {
+      try {
+        const count = await Student.countDocuments({
+          schoolId: req.user?.schoolId,
+          classId: c._id,
+          status: { $ne: 'inactive' },
+        });
+        studentCountMap.set(c._id.toString(), count);
+      } catch {
+        studentCountMap.set(c._id.toString(), 0);
+      }
+    }
 
-    const enhancedClasses = classes.map(c => {
+    const enhancedClasses = classes.map((c) => {
       const cId = c._id.toString();
       const classTeachers = new Set<string>();
 
@@ -108,6 +124,14 @@ export const getClasses = async (req: AuthRequest, res: Response): Promise<void>
       });
 
       const obj: any = c.toObject();
+      const levelName =
+        typeof c.classLevelId === 'object' && c.classLevelId
+          ? (c.classLevelId as any).name
+          : (c as any).name || 'Class';
+
+      obj.className = levelName;
+      obj.name = `${levelName} - ${c.arm}`;
+      obj.level = levelName;
       obj.assignedTeachers = Array.from(classTeachers);
       obj.studentCount = studentCountMap.get(cId) || 0;
       return obj;

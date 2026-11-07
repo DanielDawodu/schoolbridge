@@ -7,12 +7,13 @@ import ClassGroup from '../models/ClassGroup';
 import Student from '../models/Student';
 
 export const requireClassAccess = async (req: AuthRequest, res: Response, next: any): Promise<void> => {
-  if (req.user?.role === 'admin') {
+  // Admins and accountants have full access to school classes
+  if (req.user?.role === 'admin' || req.user?.role === 'accountant') {
     return next();
   }
 
   if (req.user?.role !== 'teacher') {
-    res.status(403).json({ error: 'Teacher access required' });
+    res.status(403).json({ error: 'Teacher or authorized staff access required' });
     return;
   }
 
@@ -43,12 +44,13 @@ export const requireClassAccess = async (req: AuthRequest, res: Response, next: 
 };
 
 export const requireStudentAccess = async (req: AuthRequest, res: Response, next: any): Promise<void> => {
-  if (req.user?.role === 'admin') {
+  // Admins and accountants have full access to students
+  if (req.user?.role === 'admin' || req.user?.role === 'accountant') {
     return next();
   }
 
   if (req.user?.role !== 'teacher') {
-    res.status(403).json({ error: 'Teacher access required' });
+    res.status(403).json({ error: 'Teacher or authorized staff access required' });
     return;
   }
 
@@ -79,12 +81,12 @@ export const requireStudentAccess = async (req: AuthRequest, res: Response, next
 };
 
 export const requireAdminOrTeacherForClass = async (req: AuthRequest, res: Response, next: any): Promise<void> => {
-  if (req.user?.role === 'admin') {
+  if (req.user?.role === 'admin' || req.user?.role === 'accountant') {
     return next();
   }
 
   if (req.user?.role !== 'teacher') {
-    res.status(403).json({ error: 'Teacher access required' });
+    res.status(403).json({ error: 'Teacher or authorized staff access required' });
     return;
   }
 

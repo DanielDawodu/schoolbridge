@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import api from '../services/api';
+import { ClassSelectionGrid } from '../components/ClassSelectionGrid';
 import {
   Printer,
   ChevronRight,
   ArrowLeft,
   Users,
   Search,
-  BookOpen,
   ShieldAlert,
   Save,
   CheckCircle,
@@ -121,7 +121,6 @@ const HalfTermReport: React.FC = () => {
   const [hasActiveTerm, setHasActiveTerm] = useState<boolean>(true);
 
   // Search & Tracker
-  const [classSearch, setClassSearch] = useState<string>('');
   const [studentSearch, setStudentSearch] = useState<string>('');
   const [completionMap, setCompletionMap] = useState<Record<string, any>>({});
   const [classProgressMap, setClassProgressMap] = useState<Record<string, { completed: number; total: number }>>({});
@@ -504,16 +503,6 @@ const HalfTermReport: React.FC = () => {
     window.print();
   };
 
-  const filteredClasses = useMemo(() => {
-    return classes.filter((cls) => {
-      const name = typeof cls.classLevelId === 'object' ? cls.classLevelId.name : cls.name || '';
-      const arm = cls.arm || '';
-      const full = `${name} ${arm}`.toLowerCase();
-      const teachers = (cls.assignedTeachers || []).join(' ').toLowerCase();
-      return full.includes(classSearch.toLowerCase()) || teachers.includes(classSearch.toLowerCase());
-    });
-  }, [classes, classSearch]);
-
   const filteredStudents = useMemo(() => {
     return students.filter(
       (s) =>
@@ -598,75 +587,29 @@ const HalfTermReport: React.FC = () => {
 
       {/* STEP 1: CLASS SELECTION */}
       {step === 'classes' && (
-        <div className="space-y-5">
-          <div className="relative max-w-md">
-            <Search className="h-4 w-4 text-gray-400 absolute left-3 top-3" />
-            <input
-              type="text"
-              placeholder="Search classes or teachers..."
-              value={classSearch}
-              onChange={(e) => setClassSearch(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-            />
-          </div>
-
-          {loading ? (
-            <div className="p-12 text-center text-gray-500">Loading classes...</div>
-          ) : filteredClasses.length === 0 ? (
-            <div className="p-12 text-center bg-white rounded-lg border border-gray-200 text-gray-500">
-              <BookOpen className="h-10 w-10 text-gray-400 mx-auto mb-2" />
-              <p className="font-semibold">No classes found</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              {filteredClasses.map((cls) => {
-                const className = typeof cls.classLevelId === 'object' ? cls.classLevelId.name : cls.name || 'Class';
-                const progress = classProgressMap[cls._id] || { completed: 0, total: 0 };
-                const pct = progress.total > 0 ? Math.round((progress.completed / progress.total) * 100) : 0;
-
-                return (
-                  <div
-                    key={cls._id}
-                    onClick={() => handleSelectClass(cls)}
-                    className="bg-white rounded-xl border border-gray-200 p-5 hover:border-indigo-400 hover:shadow-md cursor-pointer transition-all flex flex-col justify-between group"
-                  >
-                    <div>
-                      <div className="flex items-start justify-between">
-                        <div className="h-10 w-10 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-sm">
-                          {cls.arm || 'C'}
-                        </div>
-                        <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-gray-100 text-gray-700">
-                          {progress.total} Students
-                        </span>
-                      </div>
-
-                      <h3 className="text-lg font-bold text-gray-900 mt-3 group-hover:text-indigo-600 transition-colors">
-                        {className} - {cls.arm}
-                      </h3>
-
-                      <p className="text-xs text-gray-500 mt-1">
-                        Teacher(s):{' '}
-                        <span className="text-gray-700 font-medium">
-                          {cls.assignedTeachers?.length ? cls.assignedTeachers.join(', ') : 'Unassigned'}
-                        </span>
-                      </p>
-                    </div>
-
-                    <div className="mt-5 pt-4 border-t border-gray-100">
-                      <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
-                        <span>Completion</span>
-                        <span className="font-semibold text-indigo-600">{pct}%</span>
-                      </div>
-                      <div className="w-full bg-gray-100 rounded-full h-1.5">
-                        <div className="bg-indigo-600 h-1.5 rounded-full" style={{ width: `${pct}%` }}></div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+        <ClassSelectionGrid
+          classes={classes}
+          loading={loading}
+          error={errorMessage}
+          onRetry={init}
+          onSelectClass={handleSelectClass}
+          actionText="Open class students"
+          renderProgressOrMeta={(cls) => {
+            const progress = classProgressMap[cls._id] || { completed: 0, total: 0 };
+            const pct = progress.total > 0 ? Math.round((progress.completed / progress.total) * 100) : 0;
+            return (
+              <div>
+                <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
+                  <span>Completion</span>
+                  <span className="font-semibold text-indigo-600">{pct}%</span>
+                </div>
+                <div className="w-full bg-gray-100 rounded-full h-1.5">
+                  <div className="bg-indigo-600 h-1.5 rounded-full" style={{ width: `${pct}%` }}></div>
+                </div>
+              </div>
+            );
+          }}
+        />
       )}
 
       {/* STEP 2: STUDENT SELECTION */}

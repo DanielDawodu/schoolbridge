@@ -20,6 +20,8 @@ import SubjectRegistration from './pages/SubjectRegistration';
 import ResultEntry from './pages/ResultEntry';
 import ReportCard from './pages/ReportCard';
 import HalfTermReport from './pages/HalfTermReport';
+import PaymentVouchers from './pages/PaymentVouchers';
+import VerifyReceipt from './pages/VerifyReceipt';
 
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -248,6 +250,20 @@ function App() {
               <ProtectedRoute>
                 <AccountantOrAdminRoute>
                   <Fees />
+                </AccountantOrAdminRoute>
+              </ProtectedRoute>
+            }
+          />
+                    <Route
+            path="/verify-receipt/:verificationCode"
+            element={<VerifyReceipt />}
+          />
+          <Route
+            path="/payment-vouchers"
+            element={
+              <ProtectedRoute>
+                <AccountantOrAdminRoute>
+                  <PaymentVouchers />
                 </AccountantOrAdminRoute>
               </ProtectedRoute>
             }

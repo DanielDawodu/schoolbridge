@@ -1,34 +1,30 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import api from '../services/api';
+import { QRCodeSVG } from 'qrcode.react';
 import {
-  Search,
+  CreditCard,
   Plus,
   Trash2,
+  AlertCircle,
+  CheckCircle,
+  FileText,
   Printer,
   ArrowLeft,
-  CheckCircle,
-  AlertCircle,
+  Search,
+  DollarSign,
+  TrendingUp,
   Clock,
-  ChevronRight,
   ShieldAlert,
-  FileText,
-  Building,
-  RefreshCw,
-  X,
 } from 'lucide-react';
+import ClassSelectionGrid, { type ClassItem } from '../components/ClassSelectionGrid';
+import { amountToWords } from '../utils/numberToWords';
 
-interface ClassSummary {
-  _id: string;
+interface ChargeItem {
+  id: string;
   name: string;
-  className: string;
-  arm: string;
-  assignedTeachers: string[];
-  studentCount: number;
-  billingStatus: 'not_billed' | 'partial' | 'billed';
-  invoicesCount: number;
-  totalAmountDue: number;
-  totalPaid: number;
-  totalOutstanding: number;
+  amount: number | '';
+  note?: string;
+  isTuition?: boolean;
 }
 
 interface StudentInvoice {
@@ -44,89 +40,123 @@ interface StudentInvoice {
   amountPaid: number;
   remainingBalance: number;
   status: 'unpaid' | 'partial' | 'paid';
-  dueDate: string;
-  lineItems: Array<{ name: string; amount: number; isTuition?: boolean; isCarryover?: boolean }>;
-  createdAt: string;
+  dueDate?: string;
+  lineItems?: Array<{ name: string; amount: number; isTuition?: boolean; isCarryover?: boolean }>;
 }
 
-interface CarryoverPreviewStudent {
-  studentId: string;
-  fullName: string;
-  admissionNo: string;
-  gender?: string;
-  previousTermCarryover: number;
-  carryoverSources: Array<{ invoiceId: string; termName: string; amount: number }>;
+interface ReceiptData {
+  _id: string;
+  receiptNumber: string;
+  verificationCode: string;
+  paidAt: string;
+  amountPaid: number;
+  amountInWords: string;
+  paymentMethod: string;
+  referenceNumber?: string;
+  previousBalance: number;
+  remainingBalance: number;
+  status: 'valid' | 'voided' | 'reversed';
+  note?: string;
+  student: {
+    _id: string;
+    fullName: string;
+    admissionNo: string;
+  };
+  className: string;
+  termName: string;
+  school: {
+    name: string;
+    address: string;
+    signatureUrl?: string;
+  };
+  cashier: string;
 }
 
-interface ChargeLine {
-  id: string;
-  name: string;
-  amount: number | '';
-}
+export const Fees: React.FC = () => {
+  // Navigation / Workflow view
+  // 'classes' -> class list
+  // 'class_fees' -> class payment management (financial summary, student table, payment reports)
+  // 'generate_bill_class_select' -> select class to bill
+  // 'generate_bill_form' -> bill creation form
+  const [view, setView] = useState<'classes' | 'class_fees' | 'generate_bill_class_select' | 'generate_bill_form'>('classes');
 
-const COMMON_CHARGE_PRESETS = [
-  'Examination Fee',
-  'Development Levy',
-  'ICT Fee',
-  'Sports Fee',
-  'Books and Educational Materials',
-  'Transportation',
-  'Uniform & Badges',
-  'PTA Levy',
-];
-
-const Fees: React.FC = () => {
-  // Navigation / Workflow steps
-  const [activeTab, setActiveTab] = useState<'billing' | 'dashboard'>('billing');
-  const [billingStep, setBillingStep] = useState<'classes' | 'create_bill' | 'invoices'>('classes');
-
-  // Selected class & invoice
-  const [selectedClass, setSelectedClass] = useState<ClassSummary | null>(null);
-  const [classInvoices, setClassInvoices] = useState<StudentInvoice[]>([]);
-  const [printingInvoice, setPrintingInvoice] = useState<any | null>(null);
-
-  // Class summaries
-  const [classes, setClasses] = useState<ClassSummary[]>([]);
-  const [activeTermInfo, setActiveTermInfo] = useState<any>(null);
+  // Active configuration (strictly centralized from Settings)
   const [hasActiveTerm, setHasActiveTerm] = useState<boolean>(true);
+  const [activeTermInfo, setActiveTermInfo] = useState<any>(null);
 
-  // Form states for creating class bill
-  const [tuition, setTuition] = useState<number | ''>(50000);
-  const [additionalCharges, setAdditionalCharges] = useState<ChargeLine[]>([
-    { id: '1', name: 'Examination Fee', amount: 5000 },
-    { id: '2', name: 'Development Levy', amount: 3000 },
+  // Class list data
+  const [classes, setClasses] = useState<ClassItem[]>([]);
+  const [selectedClass, setSelectedClass] = useState<ClassItem | null>(null);
+
+  // Class Fee-Management data
+  const [classInvoices, setClassInvoices] = useState<StudentInvoice[]>([]);
+  const [fullyPaidStudents, setFullyPaidStudents] = useState<any[]>([]);
+  const [debtorsList, setDebtorsList] = useState<any[]>([]);
+  const [classSummary, setClassSummary] = useState<{
+    totalExpected: number;
+    totalCollected: number;
+    totalOutstanding: number;
+  }>({ totalExpected: 0, totalCollected: 0, totalOutstanding: 0 });
+
+  // Bill Generation data & form
+  const [tuitionAmount, setTuitionAmount] = useState<number | ''>(30000);
+  const [tuitionNote, setTuitionNote] = useState<string>('Standard Term Tuition');
+  const [additionalCharges, setAdditionalCharges] = useState<ChargeItem[]>([
+    { id: '1', name: 'School Lessons', amount: 5000, note: 'Compulsory Term Extra Lessons' },
+    { id: '2', name: 'Examination Fee', amount: 3000, note: 'End of Term Assessment' },
   ]);
-  const [dueDate, setDueDate] = useState<string>(
-    new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+  const [billDueDate, setBillDueDate] = useState<string>(
+    new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
   );
+  const [carryoverPreview, setCarryoverPreview] = useState<{
+    totalCarryover: number;
+    studentsWithCarryover: number;
+    alreadyBilled: boolean;
+    existingCount: number;
+    students: any[];
+  }>({ totalCarryover: 0, studentsWithCarryover: 0, alreadyBilled: false, existingCount: 0, students: [] });
 
-  // Carryover preview data
-  const [carryoverStudents, setCarryoverStudents] = useState<CarryoverPreviewStudent[]>([]);
-  const [totalCarryoverAcrossClass, setTotalCarryoverAcrossClass] = useState<number>(0);
-  const [alreadyBilled, setAlreadyBilled] = useState<boolean>(false);
-  const [existingInvoiceCount, setExistingInvoiceCount] = useState<number>(0);
-
-  // Confirmation modal
-  const [showConfirmModal, setShowConfirmModal] = useState<boolean>(false);
-  const [generating, setGenerating] = useState<boolean>(false);
-
-  // Payment recording modal
+  // Modals & Popups
   const [showPaymentModal, setShowPaymentModal] = useState<boolean>(false);
-  const [paymentInvoice, setPaymentInvoice] = useState<StudentInvoice | null>(null);
+  const [paymentTargetInvoice, setPaymentTargetInvoice] = useState<StudentInvoice | null>(null);
   const [paymentAmount, setPaymentAmount] = useState<number | ''>('');
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'bank_transfer' | 'pos' | 'cheque' | 'other'>('bank_transfer');
+  const [paymentRef, setPaymentRef] = useState<string>('');
+  const [paymentDate, setPaymentDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [paymentNote, setPaymentNote] = useState<string>('');
   const [recordingPayment, setRecordingPayment] = useState<boolean>(false);
 
-  // Fees Dashboard stats
+  // Printable Receipt Modal
+  const [showReceiptModal, setShowReceiptModal] = useState<boolean>(false);
+  const [currentReceipt, setCurrentReceipt] = useState<ReceiptData | null>(null);
+
+  // Printable Bill Modal
+  const [showPrintBillModal, setShowPrintBillModal] = useState<boolean>(false);
+  const [billToPrint, setBillToPrint] = useState<{
+    invoice: any;
+    school: any;
+    classInfo: any;
+    totalPaid?: number;
+    remainingBalance?: number;
+  } | null>(null);
+
+  // Confirmation dialog for bill generation
+  const [showConfirmBillModal, setShowConfirmBillModal] = useState<boolean>(false);
+  const [generatingBill, setGeneratingBill] = useState<boolean>(false);
+  const [overwriteBill, setOverwriteBill] = useState<boolean>(false);
+
+  // Dashboard Stats Toggle
+  const [showDashboardStats, setShowDashboardStats] = useState<boolean>(false);
   const [dashboardStats, setDashboardStats] = useState<any>(null);
 
   // UI state
   const [loading, setLoading] = useState<boolean>(true);
-  const [classSearch, setClassSearch] = useState<string>('');
   const [studentSearch, setStudentSearch] = useState<string>('');
+  const [studentStatusFilter, setStudentStatusFilter] = useState<'all' | 'paid' | 'partial' | 'unpaid'>('all');
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // Load active academic period and class summaries on mount
   useEffect(() => {
     initFees();
   }, []);
@@ -146,7 +176,7 @@ const Fees: React.FC = () => {
       setHasActiveTerm(true);
       setActiveTermInfo(periodRes.data);
 
-      await Promise.all([loadClassSummaries(), loadFeesDashboard()]);
+      await Promise.all([loadClassesSummary(), loadFeesDashboard()]);
     } catch (err: any) {
       console.error('Failed to initialize fees:', err);
       setErrorMessage(err.response?.data?.error || 'Failed to initialize Fees module.');
@@ -155,12 +185,13 @@ const Fees: React.FC = () => {
     }
   };
 
-  const loadClassSummaries = async () => {
+  const loadClassesSummary = async () => {
     try {
       const res = await api.get('/fees/classes-summary');
       setClasses(res.data?.classes || []);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to load class billing summary:', err);
+      setErrorMessage(err.response?.data?.error || 'Failed to load class summaries.');
     }
   };
 
@@ -173,199 +204,274 @@ const Fees: React.FC = () => {
     }
   };
 
-  // Step 1: Select class -> Step 2: Open class billing
-  const handleSelectClass = async (cls: ClassSummary) => {
+  // Open class fee management view
+  const handleOpenClassFees = async (cls: ClassItem) => {
     setSelectedClass(cls);
+    setView('class_fees');
+    setStudentSearch('');
+    setStudentStatusFilter('all');
     setSuccessMessage(null);
     setErrorMessage(null);
 
+    await Promise.all([loadClassInvoices(cls._id), loadClassReports(cls._id)]);
+  };
+
+  const loadClassInvoices = async (classId: string) => {
     try {
       setLoading(true);
-      // Fetch carryover preview
-      const previewRes = await api.get('/fees/class-preview', {
-        params: { classId: cls._id },
+      const res = await api.get('/fees/class-invoices', { params: { classId } });
+      const invoices: StudentInvoice[] = res.data?.invoices || [];
+      setClassInvoices(invoices);
+
+      // Compute actual class financial summary
+      let totalExpected = 0;
+      let totalCollected = 0;
+      let totalOutstanding = 0;
+
+      invoices.forEach((inv) => {
+        totalExpected += inv.amountDue;
+        totalCollected += inv.amountPaid;
+        totalOutstanding += inv.remainingBalance;
       });
 
-      const pData = previewRes.data;
-      setCarryoverStudents(pData.students || []);
-      setTotalCarryoverAcrossClass(pData.totalCarryoverAcrossClass || 0);
-      setAlreadyBilled(Boolean(pData.alreadyBilled));
-      setExistingInvoiceCount(pData.existingInvoiceCount || 0);
-
-      // If already billed, load invoices and go to invoice view
-      if (pData.alreadyBilled) {
-        await loadClassInvoices(cls._id);
-        setBillingStep('invoices');
-      } else {
-        setBillingStep('create_bill');
-      }
+      setClassSummary({ totalExpected, totalCollected, totalOutstanding });
     } catch (err: any) {
-      console.error('Failed to load class preview:', err);
-      setErrorMessage(err.response?.data?.error || 'Failed to inspect class billing details.');
+      console.error('Failed to load class invoices:', err);
+      setErrorMessage(err.response?.data?.error || 'Failed to load class invoices.');
     } finally {
       setLoading(false);
     }
   };
 
-  const loadClassInvoices = async (classId: string) => {
+  const loadClassReports = async (classId: string) => {
     try {
-      const res = await api.get('/fees/class-invoices', {
-        params: { classId },
-      });
-      setClassInvoices(res.data?.invoices || []);
+      const res = await api.get('/fees/class-reports', { params: { classId } });
+      setFullyPaidStudents(res.data?.fullyPaidStudents || []);
+      setDebtorsList(res.data?.debtorsList || []);
     } catch (err) {
-      console.error('Failed to load class invoices:', err);
+      console.error('Failed to load class payment reports:', err);
     }
   };
 
-  // Additional charges management
-  const handleAddChargeLine = (presetName: string = '') => {
-    setAdditionalCharges([
-      ...additionalCharges,
-      { id: Date.now().toString(), name: presetName, amount: 0 },
-    ]);
-  };
-
-  const handleRemoveChargeLine = (id: string) => {
-    setAdditionalCharges(additionalCharges.filter((c) => c.id !== id));
-  };
-
-  const handleChargeChange = (id: string, field: 'name' | 'amount', value: any) => {
-    setAdditionalCharges(
-      additionalCharges.map((c) => {
-        if (c.id === id) {
-          if (field === 'amount') {
-            const num = value === '' ? '' : Math.max(0, parseFloat(value) || 0);
-            return { ...c, amount: num };
-          }
-          return { ...c, [field]: value };
-        }
-        return c;
-      })
-    );
-  };
-
-  // Automatic calculation of current term charges
-  const currentTermCharges = useMemo(() => {
-    const t = typeof tuition === 'number' ? tuition : 0;
-    const addtl = additionalCharges.reduce((sum, c) => sum + (typeof c.amount === 'number' ? c.amount : 0), 0);
-    return t + addtl;
-  }, [tuition, additionalCharges]);
-
-  const totalClassExpectedAmount = useMemo(() => {
-    const studentCount = carryoverStudents.length;
-    return studentCount * currentTermCharges + totalCarryoverAcrossClass;
-  }, [carryoverStudents, currentTermCharges, totalCarryoverAcrossClass]);
-
-  // Execute class bill generation
-  const handleConfirmGenerateBill = async (overwrite: boolean = false) => {
-    if (!selectedClass) return;
-
-    if (typeof tuition !== 'number' || tuition < 0) {
-      alert('Please enter a valid tuition amount.');
-      return;
-    }
-
-    try {
-      setGenerating(true);
-      setErrorMessage(null);
-      setSuccessMessage(null);
-
-      const payload = {
-        classId: selectedClass._id,
-        tuition,
-        additionalCharges: additionalCharges.map((c) => ({
-          name: c.name,
-          amount: Number(c.amount) || 0,
-        })),
-        dueDate,
-        overwrite,
-      };
-
-      const res = await api.post('/fees/generate-class-bill', payload);
-
-      setSuccessMessage(res.data.message || 'Invoices successfully generated for the entire class!');
-      setShowConfirmModal(false);
-
-      // Load generated invoices and switch to invoice view
-      await Promise.all([loadClassInvoices(selectedClass._id), loadClassSummaries(), loadFeesDashboard()]);
-      setBillingStep('invoices');
-    } catch (err: any) {
-      console.error('Generate bill error:', err);
-      if (err.response?.status === 409) {
-        if (window.confirm('A bill already exists for this class in this term. Would you like to revise/overwrite the existing invoices?')) {
-          handleConfirmGenerateBill(true);
-          return;
-        }
-      }
-      setErrorMessage(err.response?.data?.error || 'Failed to generate class bills.');
-    } finally {
-      setGenerating(false);
-    }
-  };
-
-  // Record payment
-  const handleOpenPaymentModal = (invoice: StudentInvoice) => {
-    setPaymentInvoice(invoice);
-    setPaymentAmount(invoice.remainingBalance);
-    setPaymentNote('School fee payment');
+  // =========================================================================
+  // RECORD PAYMENT WORKFLOW
+  // =========================================================================
+  const handleOpenRecordPayment = (inv: StudentInvoice) => {
+    setPaymentTargetInvoice(inv);
+    setPaymentAmount(inv.remainingBalance > 0 ? inv.remainingBalance : '');
+    setPaymentMethod('bank_transfer');
+    setPaymentRef('');
+    setPaymentDate(new Date().toISOString().slice(0, 10));
+    setPaymentNote('');
     setShowPaymentModal(true);
   };
 
-  const handleRecordPayment = async () => {
-    if (!paymentInvoice || typeof paymentAmount !== 'number' || paymentAmount <= 0) {
-      alert('Please enter a valid positive payment amount.');
+  const handleRecordPaymentSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!paymentTargetInvoice) return;
+
+    const numAmount = Number(paymentAmount);
+    if (isNaN(numAmount) || numAmount <= 0) {
+      alert('Payment amount must be greater than zero.');
       return;
     }
 
     try {
       setRecordingPayment(true);
-      await api.post('/fees/payments', {
-        invoiceId: paymentInvoice._id,
-        amountPaid: paymentAmount,
-        note: paymentNote,
-      });
+      const payload = {
+        invoiceId: paymentTargetInvoice._id,
+        amountPaid: numAmount,
+        paymentMethod,
+        referenceNumber: paymentRef.trim() || undefined,
+        paidAt: paymentDate,
+        note: paymentNote.trim() || undefined,
+      };
+
+      const res = await api.post('/fees/payments', payload);
 
       setShowPaymentModal(false);
-      setSuccessMessage(`Payment of ₦${paymentAmount.toLocaleString()} recorded successfully!`);
+      setSuccessMessage(
+        `Payment of ₦${numAmount.toLocaleString()} recorded successfully! Official Receipt: ${res.data?.receipt?.receiptNumber}`
+      );
+      setTimeout(() => setSuccessMessage(null), 6000);
 
-      // Refresh invoices and dashboard
-      if (selectedClass) {
-        await loadClassInvoices(selectedClass._id);
-        await loadClassSummaries();
+      // Show receipt for printing
+      if (res.data?.receipt) {
+        setCurrentReceipt(res.data.receipt);
+        setShowReceiptModal(true);
       }
-      await loadFeesDashboard();
+
+      // Refresh class invoices and reports
+      if (selectedClass) {
+        await Promise.all([
+          loadClassInvoices(selectedClass._id),
+          loadClassReports(selectedClass._id),
+          loadClassesSummary(),
+          loadFeesDashboard(),
+        ]);
+      }
     } catch (err: any) {
+      console.error('Record payment error:', err);
       alert(err.response?.data?.error || 'Failed to record payment.');
     } finally {
       setRecordingPayment(false);
     }
   };
 
-  // Open printable bill
-  const handleOpenPrintBill = async (invoiceId: string) => {
+  // View / Print Bill for a student
+  const handlePrintStudentBill = async (invoiceId: string) => {
     try {
+      setLoading(true);
       const res = await api.get(`/fees/invoice-detail/${invoiceId}`);
-      setPrintingInvoice(res.data);
-    } catch (err) {
-      alert('Failed to load invoice details for printing.');
+      setBillToPrint(res.data);
+      setShowPrintBillModal(true);
+    } catch (err: any) {
+      console.error('Failed to load bill detail:', err);
+      alert(err.response?.data?.error || 'Failed to load bill detail for printing.');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const filteredClassList = classes.filter((cls) => {
-    const q = classSearch.toLowerCase();
-    return cls.name.toLowerCase().includes(q) || cls.assignedTeachers.join(' ').toLowerCase().includes(q);
-  });
+  // Reprint Receipt for a student's last payment or specific payment
+  const handleReprintReceipt = async (invoiceId: string) => {
+    try {
+      setLoading(true);
+      const res = await api.get(`/fees/invoices/${invoiceId}/payments`);
+      const payments = res.data?.payments || [];
+      if (payments.length === 0) {
+        alert('No payments have been recorded for this student invoice yet.');
+        return;
+      }
+      // Get the latest payment
+      const latestPayment = payments[payments.length - 1];
+      const receiptRes = await api.get(`/fees/receipts/${latestPayment._id}`);
+      setCurrentReceipt(receiptRes.data?.receipt);
+      setShowReceiptModal(true);
+    } catch (err: any) {
+      console.error('Failed to load receipt:', err);
+      alert(err.response?.data?.error || 'Failed to retrieve receipt.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  const filteredInvoices = classInvoices.filter((inv) => {
-    const q = studentSearch.toLowerCase();
-    return (
-      inv.fullName.toLowerCase().includes(q) ||
-      inv.admissionNo.toLowerCase().includes(q) ||
-      inv.invoiceNumber.toLowerCase().includes(q)
+  // =========================================================================
+  // GENERATE BILL WORKFLOW
+  // =========================================================================
+  const handleStartGenerateBill = () => {
+    setView('generate_bill_class_select');
+  };
+
+  const handleSelectClassToBill = async (cls: ClassItem) => {
+    setSelectedClass(cls);
+    setView('generate_bill_form');
+    setOverwriteBill(false);
+
+    try {
+      setLoading(true);
+      const previewRes = await api.get('/fees/class-preview', {
+        params: { classId: cls._id },
+      });
+
+      const pData = previewRes.data;
+      setCarryoverPreview({
+        totalCarryover: pData.totalCarryoverAcrossClass || 0,
+        studentsWithCarryover: pData.studentsWithCarryoverCount || 0,
+        alreadyBilled: Boolean(pData.alreadyBilled),
+        existingCount: pData.existingInvoiceCount || 0,
+        students: pData.students || [],
+      });
+    } catch (err: any) {
+      console.error('Failed to load billing preview:', err);
+      alert(err.response?.data?.error || 'Failed to load class billing preview.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAddChargeRow = () => {
+    setAdditionalCharges((prev) => [
+      ...prev,
+      { id: Date.now().toString(), name: '', amount: '', note: '' },
+    ]);
+  };
+
+  const handleRemoveChargeRow = (id: string) => {
+    setAdditionalCharges((prev) => prev.filter((c) => c.id !== id));
+  };
+
+  const handleUpdateChargeRow = (id: string, field: 'name' | 'amount' | 'note', val: any) => {
+    setAdditionalCharges((prev) =>
+      prev.map((c) => {
+        if (c.id === id) {
+          return { ...c, [field]: val };
+        }
+        return c;
+      })
     );
-  });
+  };
 
+  const currentTermBaseTotal = useMemo(() => {
+    const t = Number(tuitionAmount) || 0;
+    const add = additionalCharges.reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+    return t + add;
+  }, [tuitionAmount, additionalCharges]);
+
+  const handleConfirmGenerateBill = async () => {
+    if (!selectedClass) return;
+
+    try {
+      setGeneratingBill(true);
+      const formattedCharges = additionalCharges
+        .filter((c) => c.name.trim() && Number(c.amount) > 0)
+        .map((c) => ({
+          name: c.name.trim(),
+          amount: Number(c.amount),
+          note: c.note?.trim() || undefined,
+        }));
+
+      const payload = {
+        classId: selectedClass._id,
+        tuition: Number(tuitionAmount) || 0,
+        additionalCharges: formattedCharges,
+        dueDate: billDueDate,
+        overwrite: overwriteBill,
+      };
+
+      const res = await api.post('/fees/generate-class-bill', payload);
+
+      setShowConfirmBillModal(false);
+      setSuccessMessage(
+        `Class bill generated successfully! ${res.data?.invoicesCount} student invoices created.`
+      );
+      setTimeout(() => setSuccessMessage(null), 5000);
+
+      // Open class fee management
+      await handleOpenClassFees(selectedClass);
+    } catch (err: any) {
+      console.error('Generate bill error:', err);
+      alert(err.response?.data?.error || 'Failed to generate class bill.');
+    } finally {
+      setGeneratingBill(false);
+    }
+  };
+
+  // Filtered students in student payment table
+  const filteredInvoices = useMemo(() => {
+    return classInvoices.filter((inv) => {
+      const matchSearch =
+        inv.fullName.toLowerCase().includes(studentSearch.toLowerCase()) ||
+        inv.admissionNo.toLowerCase().includes(studentSearch.toLowerCase());
+
+      if (studentStatusFilter === 'paid') return matchSearch && inv.status === 'paid';
+      if (studentStatusFilter === 'partial') return matchSearch && inv.status === 'partial';
+      if (studentStatusFilter === 'unpaid') return matchSearch && inv.status === 'unpaid';
+      return matchSearch;
+    });
+  }, [classInvoices, studentSearch, studentStatusFilter]);
+
+  // If central active period is not configured, show blocker alert
   if (!loading && !hasActiveTerm) {
     return (
       <div className="max-w-4xl mx-auto py-12 px-4">
@@ -373,17 +479,17 @@ const Fees: React.FC = () => {
           <div className="flex items-start">
             <ShieldAlert className="h-7 w-7 text-amber-500 mr-4 flex-shrink-0 mt-0.5" />
             <div>
-              <h2 className="text-lg font-bold text-amber-900">Active Academic Session Required</h2>
+              <h2 className="text-lg font-bold text-amber-900">Active Academic Session & Term Required</h2>
               <p className="mt-2 text-sm text-amber-800 leading-relaxed">
-                Bill Generation requires an active academic session and term to be configured centrally in Settings.
-                All fee invoices and payments must be associated with the school's active period.
+                Fees management and bill generation require an active academic session and current term to be configured centrally in Settings.
+                Currently, no active term is configured for your school.
               </p>
               <div className="mt-4">
                 <a
                   href="/settings"
-                  className="inline-flex items-center px-4 py-2 text-sm font-semibold rounded-md shadow-xs text-white bg-amber-600 hover:bg-amber-700"
+                  className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-semibold rounded-md shadow-xs text-white bg-amber-600 hover:bg-amber-700"
                 >
-                  Go to Settings →
+                  Go to Settings to Configure Active Term →
                 </a>
               </div>
             </div>
@@ -395,508 +501,447 @@ const Fees: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-gray-200 pb-4 print:hidden">
+      {/* Header Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-gray-200 pb-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Fees & Class Billing</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Fees Management</h1>
           <p className="text-sm text-gray-500 mt-1">
-            Automated class billing with carryover balance calculation and invoice printing.
+            {view === 'classes' && 'Select a class to manage student billing, payments, receipts, and debtor reports.'}
+            {view === 'class_fees' && selectedClass && (
+              <>
+                Class: <strong className="text-indigo-600">{selectedClass.name}</strong> • Record payments and view financial ledger
+              </>
+            )}
+            {view === 'generate_bill_class_select' && 'Select a class to configure tuition, fees, and automated carryover.'}
+            {view === 'generate_bill_form' && selectedClass && (
+              <>
+                Generating bill for <strong className="text-indigo-600">{selectedClass.name}</strong>
+              </>
+            )}
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        {/* Central Active Period Badge & Top Actions */}
+        <div className="flex items-center gap-3 flex-wrap">
           {activeTermInfo && (
             <div className="inline-flex items-center space-x-2 bg-indigo-50 border border-indigo-200 text-indigo-700 px-3.5 py-1.5 rounded-full text-xs font-semibold shadow-xs">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              <span>
-                Active Period: {activeTermInfo.session?.year || 'Current'} · Term {activeTermInfo.session?.currentTerm || 'Term'}
-              </span>
+              <span>Active Period: {activeTermInfo.name}</span>
             </div>
           )}
 
-          <div className="inline-flex rounded-lg border border-gray-300 p-0.5 bg-gray-50">
-            <button
-              onClick={() => setActiveTab('billing')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
-                activeTab === 'billing' ? 'bg-white text-indigo-700 shadow-2xs' : 'text-gray-600 hover:text-gray-900'
-              }`}
-            >
-              Class Billing
-            </button>
-            <button
-              onClick={() => setActiveTab('dashboard')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
-                activeTab === 'dashboard' ? 'bg-white text-indigo-700 shadow-2xs' : 'text-gray-600 hover:text-gray-900'
-              }`}
-            >
-              Fees Dashboard
-            </button>
-          </div>
+          {view === 'classes' && (
+            <>
+              <button
+                onClick={() => setShowDashboardStats(!showDashboardStats)}
+                className="inline-flex items-center px-3 py-1.5 border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 text-xs font-semibold rounded-lg shadow-xs cursor-pointer"
+              >
+                <TrendingUp className="w-3.5 h-3.5 mr-1.5 text-indigo-600" />
+                {showDashboardStats ? 'Hide Summary' : 'Fees Dashboard'}
+              </button>
+
+              <button
+                onClick={handleStartGenerateBill}
+                className="inline-flex items-center px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow-xs transition-colors cursor-pointer"
+              >
+                <Plus className="w-4 h-4 mr-1.5" />
+                Generate Bill
+              </button>
+            </>
+          )}
         </div>
       </div>
 
+      {/* Global Alerts */}
       {successMessage && (
-        <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-4 rounded-lg flex items-center print:hidden shadow-xs">
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-4 rounded-lg flex items-center shadow-xs">
           <CheckCircle className="h-5 w-5 text-emerald-500 mr-3 flex-shrink-0" />
           <span className="text-sm font-medium">{successMessage}</span>
         </div>
       )}
       {errorMessage && (
-        <div className="bg-rose-50 border border-rose-200 text-rose-800 p-4 rounded-lg flex items-center print:hidden shadow-xs">
+        <div className="bg-rose-50 border border-rose-200 text-rose-800 p-4 rounded-lg flex items-center shadow-xs">
           <AlertCircle className="h-5 w-5 text-rose-500 mr-3 flex-shrink-0" />
           <span className="text-sm font-medium">{errorMessage}</span>
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* TAB 1: CLASS BILLING WORKFLOW */}
-      {/* ========================================================================= */}
-      {activeTab === 'billing' && (
-        <>
-          {/* STEP 1: SELECT CLASS */}
-          {billingStep === 'classes' && (
-            <div className="space-y-5 print:hidden">
-              <div className="relative max-w-md">
-                <Search className="h-4 w-4 text-gray-400 absolute left-3.5 top-3" />
-                <input
-                  type="text"
-                  placeholder="Search class or assigned teacher..."
-                  value={classSearch}
-                  onChange={(e) => setClassSearch(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-
-              {loading ? (
-                <div className="p-12 text-center text-gray-500">
-                  <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mb-2"></div>
-                  <p>Loading school classes & billing statuses...</p>
-                </div>
-              ) : filteredClassList.length === 0 ? (
-                <div className="p-12 text-center bg-white rounded-lg border border-gray-200 text-gray-500">
-                  <Building className="h-10 w-10 text-gray-400 mx-auto mb-2" />
-                  <p className="font-semibold text-gray-700">No classes found</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-                  {filteredClassList.map((cls) => {
-                    return (
-                      <div
-                        key={cls._id}
-                        onClick={() => handleSelectClass(cls)}
-                        className="bg-white rounded-xl border border-gray-200 p-5 hover:border-indigo-400 hover:shadow-md cursor-pointer transition-all flex flex-col justify-between group shadow-xs"
-                      >
-                        <div>
-                          <div className="flex items-start justify-between">
-                            <div className="h-10 w-10 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-sm">
-                              {cls.arm || 'C'}
-                            </div>
-                            <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-gray-100 text-gray-700">
-                              {cls.studentCount} Students
-                            </span>
-                          </div>
-
-                          <h3 className="text-lg font-bold text-gray-900 mt-3 group-hover:text-indigo-600 transition-colors">
-                            {cls.name}
-                          </h3>
-
-                          <p className="text-xs text-gray-500 mt-1">
-                            Teacher:{' '}
-                            <span className="text-gray-700 font-medium">
-                              {cls.assignedTeachers?.length ? cls.assignedTeachers.join(', ') : 'Unassigned'}
-                            </span>
-                          </p>
-                        </div>
-
-                        <div className="mt-5 pt-4 border-t border-gray-100 space-y-2 text-xs">
-                          <div className="flex justify-between items-center text-gray-600">
-                            <span>Billing Status:</span>
-                            {cls.billingStatus === 'billed' ? (
-                              <span className="inline-flex items-center text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded">
-                                <CheckCircle className="h-3 w-3 mr-1 text-emerald-600" /> Billed ({cls.invoicesCount})
-                              </span>
-                            ) : cls.billingStatus === 'partial' ? (
-                              <span className="inline-flex items-center text-amber-700 font-bold bg-amber-50 px-2 py-0.5 rounded">
-                                <Clock className="h-3 w-3 mr-1 text-amber-600" /> Partial ({cls.invoicesCount}/{cls.studentCount})
-                              </span>
-                            ) : (
-                              <span className="text-gray-500 font-medium bg-gray-100 px-2 py-0.5 rounded">
-                                Not Billed
-                              </span>
-                            )}
-                          </div>
-
-                          {cls.totalAmountDue > 0 && (
-                            <div className="flex justify-between items-center text-gray-600">
-                              <span>Total Expected:</span>
-                              <strong className="text-gray-900 font-mono">₦{cls.totalAmountDue.toLocaleString()}</strong>
-                            </div>
-                          )}
-
-                          <div className="pt-2 flex items-center justify-between text-indigo-600 font-semibold">
-                            <span>{cls.billingStatus === 'billed' ? 'View Invoices' : 'Create Term Bill'}</span>
-                            <ChevronRight className="h-4 w-4 group-hover:translate-x-1 transition-transform" />
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+      {/* Fees Dashboard Collapsible Stats */}
+      {showDashboardStats && dashboardStats && view === 'classes' && (
+        <div className="bg-gradient-to-r from-indigo-900 to-indigo-800 text-white rounded-2xl p-6 shadow-md space-y-4">
+          <div className="flex items-center justify-between border-b border-indigo-700/60 pb-3">
+            <div className="flex items-center space-x-2">
+              <DollarSign className="w-5 h-5 text-emerald-400" />
+              <h2 className="text-sm font-bold uppercase tracking-wider">
+                Active Period Financial Summary ({dashboardStats.termName})
+              </h2>
             </div>
-          )}
+            <span className="text-xs text-indigo-200 font-mono">
+              {dashboardStats.totalBillsGenerated} Bills Active
+            </span>
+          </div>
 
-          {/* STEP 2: CREATE / CONFIGURE CLASS BILL */}
-          {billingStep === 'create_bill' && selectedClass && (
-            <div className="space-y-6 print:hidden">
-              <div className="flex items-center justify-between bg-white p-4 rounded-lg border border-gray-200 shadow-xs">
-                <button
-                  onClick={() => {
-                    setBillingStep('classes');
-                    setSelectedClass(null);
-                  }}
-                  className="inline-flex items-center text-xs font-semibold text-gray-600 hover:text-indigo-600"
-                >
-                  <ArrowLeft className="h-3.5 w-3.5 mr-1" />
-                  Back to Classes
-                </button>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-1">
+            <div className="bg-white/10 rounded-xl p-4 backdrop-blur-xs">
+              <span className="text-xs text-indigo-200 uppercase font-semibold">Total Expected</span>
+              <p className="text-2xl font-black mt-1">₦{dashboardStats.totalExpected.toLocaleString()}</p>
+            </div>
+            <div className="bg-white/10 rounded-xl p-4 backdrop-blur-xs">
+              <span className="text-xs text-emerald-300 uppercase font-semibold">Total Collected</span>
+              <p className="text-2xl font-black text-emerald-400 mt-1">
+                ₦{dashboardStats.totalCollected.toLocaleString()}
+              </p>
+            </div>
+            <div className="bg-white/10 rounded-xl p-4 backdrop-blur-xs">
+              <span className="text-xs text-rose-300 uppercase font-semibold">Total Outstanding</span>
+              <p className="text-2xl font-black text-rose-400 mt-1">
+                ₦{dashboardStats.totalOutstanding.toLocaleString()}
+              </p>
+            </div>
+            <div className="bg-white/10 rounded-xl p-4 backdrop-blur-xs">
+              <span className="text-xs text-amber-300 uppercase font-semibold">Prior Carryover</span>
+              <p className="text-2xl font-black text-amber-400 mt-1">
+                ₦{dashboardStats.totalCarryover.toLocaleString()}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
-                <span className="text-xs text-gray-500">
-                  Creating Bill for Class: <strong className="text-gray-800">{selectedClass.name}</strong> ({carryoverStudents.length} Students)
+      {/* ========================================================================= */}
+      {/* VIEW 1: CLASS SELECTION (REUSABLE GRID) */}
+      {/* ========================================================================= */}
+      {view === 'classes' && (
+        <ClassSelectionGrid
+          classes={classes}
+          loading={loading}
+          error={errorMessage}
+          onSelectClass={handleOpenClassFees}
+          onRetry={initFees}
+          actionText="Open class fee ledger"
+          renderExtraBadge={(cls) => {
+            const status = cls.billingStatus;
+            if (status === 'billed') {
+              return (
+                <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                  Billed
                 </span>
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Form Inputs (Left 2 cols) */}
-                <div className="lg:col-span-2 space-y-6">
-                  {/* Default Charge: Tuition */}
-                  <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-xs space-y-4">
-                    <div className="border-b pb-3">
-                      <h3 className="text-base font-bold text-gray-900">Default Charge: Tuition</h3>
-                      <p className="text-xs text-gray-500 mt-0.5">
-                        Tuition is automatically included for every student in this class.
-                      </p>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-gray-700 uppercase mb-1">
-                        Tuition Amount (₦)
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={tuition}
-                        onChange={(e) => setTuition(e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value)))}
-                        className="w-full p-2.5 text-base font-bold text-gray-900 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                        placeholder="50000"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Additional Charges */}
-                  <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-xs space-y-4">
-                    <div className="flex items-center justify-between border-b pb-3">
-                      <div>
-                        <h3 className="text-base font-bold text-gray-900">Additional Charges</h3>
-                        <p className="text-xs text-gray-500 mt-0.5">
-                          Add levies, exam fees, sports, ICT, or textbooks for the class.
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleAddChargeLine()}
-                        className="inline-flex items-center px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-lg transition-colors cursor-pointer"
-                      >
-                        <Plus className="h-3.5 w-3.5 mr-1" /> Add Charge Line
-                      </button>
-                    </div>
-
-                    {/* Presets */}
-                    <div>
-                      <span className="text-xs text-gray-500 font-medium block mb-2">Quick Add Common Presets:</span>
-                      <div className="flex flex-wrap gap-2">
-                        {COMMON_CHARGE_PRESETS.map((preset) => (
-                          <button
-                            key={preset}
-                            type="button"
-                            onClick={() => handleAddChargeLine(preset)}
-                            className="px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-full text-xs font-medium cursor-pointer"
-                          >
-                            + {preset}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Charges list */}
-                    {additionalCharges.length === 0 ? (
-                      <p className="text-xs text-gray-400 italic py-2">No additional charges added.</p>
-                    ) : (
-                      <div className="space-y-3">
-                        {additionalCharges.map((c) => (
-                          <div key={c.id} className="flex items-center gap-3">
-                            <input
-                              type="text"
-                              value={c.name}
-                              placeholder="Description / Service Name"
-                              onChange={(e) => handleChargeChange(c.id, 'name', e.target.value)}
-                              className="flex-1 p-2 text-xs border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500"
-                            />
-                            <div className="relative w-36">
-                              <span className="absolute left-2.5 top-2 text-xs text-gray-400">₦</span>
-                              <input
-                                type="number"
-                                min="0"
-                                value={c.amount}
-                                placeholder="0"
-                                onChange={(e) => handleChargeChange(c.id, 'amount', e.target.value)}
-                                className="w-full pl-6 pr-2 py-2 text-xs font-bold border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500"
-                              />
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveChargeLine(c.id)}
-                              className="p-2 text-rose-500 hover:bg-rose-50 rounded-md"
-                              title="Remove item"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    <div className="pt-3 border-t">
-                      <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Due Date</label>
-                      <input
-                        type="date"
-                        value={dueDate}
-                        onChange={(e) => setDueDate(e.target.value)}
-                        className="p-2 text-xs border border-gray-300 rounded-md"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Carryover Breakdown Accordion */}
-                  <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-xs space-y-4">
-                    <div className="flex items-center justify-between border-b pb-3">
-                      <div>
-                        <h3 className="text-base font-bold text-gray-900">
-                          Automated Previous-Term Carryover
-                        </h3>
-                        <p className="text-xs text-gray-500 mt-0.5">
-                          Unpaid debts from previous terms are automatically rolled over without duplication.
-                        </p>
-                      </div>
-                      <span className="text-xs font-bold text-indigo-700 bg-indigo-50 px-3 py-1 rounded-full">
-                        Total Carryover: ₦{totalCarryoverAcrossClass.toLocaleString()}
-                      </span>
-                    </div>
-
-                    <div className="max-h-60 overflow-y-auto rounded-lg border border-gray-200">
-                      <table className="min-w-full divide-y divide-gray-200 text-xs">
-                        <thead className="bg-gray-50 text-gray-500 uppercase sticky top-0">
-                          <tr>
-                            <th className="px-3 py-2 text-left">Student</th>
-                            <th className="px-3 py-2 text-left">Admission No</th>
-                            <th className="px-3 py-2 text-right">Previous Unpaid Debt</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-100">
-                          {carryoverStudents.map((s) => (
-                            <tr key={s.studentId} className={s.previousTermCarryover > 0 ? 'bg-amber-50/50' : ''}>
-                              <td className="px-3 py-2 font-medium text-gray-900">{s.fullName}</td>
-                              <td className="px-3 py-2 font-mono text-gray-500">{s.admissionNo}</td>
-                              <td className={`px-3 py-2 text-right font-bold ${s.previousTermCarryover > 0 ? 'text-rose-600' : 'text-gray-400'}`}>
-                                ₦{s.previousTermCarryover.toLocaleString()}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Right Summary Card (1 col) */}
-                <div className="space-y-6">
-                  <div className="bg-gradient-to-br from-indigo-900 to-indigo-950 text-white p-6 rounded-2xl shadow-xl space-y-5 sticky top-6">
-                    <h3 className="text-base font-bold tracking-wide uppercase border-b border-indigo-700 pb-3">
-                      Class Bill Summary
-                    </h3>
-
-                    <div className="space-y-3 text-xs">
-                      <div className="flex justify-between">
-                        <span className="text-indigo-200">Class:</span>
-                        <strong className="text-white">{selectedClass.name}</strong>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-indigo-200">Eligible Students:</span>
-                        <strong className="text-white">{carryoverStudents.length}</strong>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-indigo-200">Tuition per Student:</span>
-                        <strong className="text-white">₦{Number(tuition || 0).toLocaleString()}</strong>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-indigo-200">Additional Charges:</span>
-                        <strong className="text-white">
-                          ₦{(currentTermCharges - Number(tuition || 0)).toLocaleString()}
-                        </strong>
-                      </div>
-                      <div className="flex justify-between border-t border-indigo-800 pt-2 font-semibold">
-                        <span className="text-indigo-200">Current Term Charge:</span>
-                        <strong className="text-amber-300 text-sm">₦{currentTermCharges.toLocaleString()}</strong>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-indigo-200">Total Carryover Debt:</span>
-                        <strong className="text-rose-300">₦{totalCarryoverAcrossClass.toLocaleString()}</strong>
-                      </div>
-                      <div className="flex justify-between border-t border-indigo-700 pt-3">
-                        <span className="text-sm font-bold text-white">Total Expected:</span>
-                        <strong className="text-lg font-bold text-emerald-400">
-                          ₦{totalClassExpectedAmount.toLocaleString()}
-                        </strong>
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => setShowConfirmModal(true)}
-                      className="w-full py-3 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold rounded-xl shadow-lg transition-all cursor-pointer text-center"
-                    >
-                      Confirm & Generate Class Invoices
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* STEP 3: CLASS INVOICES LIST */}
-          {billingStep === 'invoices' && selectedClass && (
-            <div className="space-y-5 print:hidden">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white p-4 rounded-lg border border-gray-200 shadow-xs">
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => {
-                      setBillingStep('classes');
-                      setSelectedClass(null);
-                    }}
-                    className="inline-flex items-center text-xs font-semibold text-gray-600 hover:text-indigo-600"
-                  >
-                    <ArrowLeft className="h-3.5 w-3.5 mr-1" />
-                    Back to Classes
-                  </button>
-                  <span className="text-gray-300">|</span>
-                  <span className="text-xs text-gray-500">
-                    Invoices for <strong className="text-gray-800">{selectedClass.name}</strong> ({classInvoices.length} invoices)
+              );
+            }
+            if (status === 'partial') {
+              return (
+                <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                  Partially Billed
+                </span>
+              );
+            }
+            return (
+              <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
+                Not Billed
+              </span>
+            );
+          }}
+          renderProgressOrMeta={(cls) => {
+            const billed = cls.totalAmountDue ?? 0;
+            const collected = cls.totalPaid ?? 0;
+            const percent = billed > 0 ? Math.round((collected / billed) * 100) : 0;
+            return (
+              <div>
+                <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
+                  <span>Collection</span>
+                  <span className="font-semibold text-indigo-600">
+                    ₦{collected.toLocaleString()} / ₦{billed.toLocaleString()} ({percent}%)
                   </span>
                 </div>
-
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => setBillingStep('create_bill')}
-                    className="inline-flex items-center px-3 py-1.5 border border-gray-300 hover:bg-gray-50 text-gray-700 text-xs font-semibold rounded-lg shadow-2xs"
-                  >
-                    <RefreshCw className="h-3.5 w-3.5 mr-1" />
-                    Revise / Re-create Bill
-                  </button>
+                <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                  <div
+                    className="bg-emerald-600 h-1.5 rounded-full transition-all"
+                    style={{ width: `${Math.min(100, percent)}%` }}
+                  ></div>
                 </div>
               </div>
+            );
+          }}
+        />
+      )}
 
-              <div className="relative max-w-md">
-                <Search className="h-4 w-4 text-gray-400 absolute left-3.5 top-3" />
-                <input
-                  type="text"
-                  placeholder="Search invoice by student or invoice #..."
-                  value={studentSearch}
-                  onChange={(e) => setStudentSearch(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
+      {/* ========================================================================= */}
+      {/* VIEW 2: CLASS FEE-MANAGEMENT PAGE */}
+      {/* ========================================================================= */}
+      {view === 'class_fees' && selectedClass && (
+        <div className="space-y-6">
+          {/* Back & Breadcrumb bar */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
+            <div className="flex items-center space-x-3">
+              <button
+                onClick={() => {
+                  setView('classes');
+                  setSelectedClass(null);
+                }}
+                className="inline-flex items-center text-xs font-semibold text-gray-600 hover:text-indigo-600 cursor-pointer"
+              >
+                <ArrowLeft className="w-3.5 h-3.5 mr-1" />
+                Back to Classes
+              </button>
+              <span className="text-gray-300">|</span>
+              <span className="text-xs text-gray-500">
+                Class: <strong className="text-gray-900">{selectedClass.name}</strong>
+              </span>
+            </div>
 
-              {filteredInvoices.length === 0 ? (
-                <div className="p-12 text-center bg-white rounded-lg border border-gray-200 text-gray-500">
-                  <FileText className="h-10 w-10 text-gray-400 mx-auto mb-2" />
-                  <p className="font-semibold text-gray-700">No invoices found</p>
-                </div>
-              ) : (
-                <div className="bg-white rounded-lg border border-gray-200 shadow-xs overflow-hidden">
-                  <table className="min-w-full divide-y divide-gray-200 text-xs">
-                    <thead className="bg-gray-50 font-semibold text-gray-500 uppercase tracking-wider">
-                      <tr>
-                        <th className="px-4 py-3 text-left">Invoice #</th>
-                        <th className="px-4 py-3 text-left">Student Name</th>
-                        <th className="px-4 py-3 text-left">Admission No</th>
-                        <th className="px-4 py-3 text-right">Current Charges</th>
-                        <th className="px-4 py-3 text-right">Carryover</th>
-                        <th className="px-4 py-3 text-right">Total Payable</th>
-                        <th className="px-4 py-3 text-right">Paid</th>
-                        <th className="px-4 py-3 text-right">Balance</th>
-                        <th className="px-4 py-3 text-center">Status</th>
-                        <th className="px-4 py-3 text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200">
-                      {filteredInvoices.map((inv) => (
-                        <tr key={inv._id} className="hover:bg-indigo-50/40 transition-colors">
-                          <td className="px-4 py-3 whitespace-nowrap font-mono font-semibold text-indigo-700">
-                            {inv.invoiceNumber}
-                          </td>
-                          <td className="px-4 py-3 whitespace-nowrap font-medium text-gray-900">
-                            {inv.fullName}
-                          </td>
-                          <td className="px-4 py-3 whitespace-nowrap font-mono text-gray-500">
-                            {inv.admissionNo}
-                          </td>
-                          <td className="px-4 py-3 whitespace-nowrap text-right font-medium text-gray-700">
-                            ₦{inv.currentTermCharges.toLocaleString()}
-                          </td>
-                          <td className={`px-4 py-3 whitespace-nowrap text-right font-medium ${inv.previousTermCarryover > 0 ? 'text-rose-600' : 'text-gray-400'}`}>
-                            ₦{inv.previousTermCarryover.toLocaleString()}
-                          </td>
-                          <td className="px-4 py-3 whitespace-nowrap text-right font-bold text-gray-900">
-                            ₦{inv.amountDue.toLocaleString()}
-                          </td>
-                          <td className="px-4 py-3 whitespace-nowrap text-right font-semibold text-emerald-700">
-                            ₦{inv.amountPaid.toLocaleString()}
-                          </td>
-                          <td className={`px-4 py-3 whitespace-nowrap text-right font-bold ${inv.remainingBalance > 0 ? 'text-rose-700' : 'text-gray-400'}`}>
-                            ₦{inv.remainingBalance.toLocaleString()}
-                          </td>
-                          <td className="px-4 py-3 whitespace-nowrap text-center">
-                            {inv.status === 'paid' ? (
-                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                                Paid
-                              </span>
-                            ) : inv.status === 'partial' ? (
-                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
-                                Partial
-                              </span>
-                            ) : (
-                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800">
-                                Unpaid
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 whitespace-nowrap text-right space-x-2">
-                            {inv.remainingBalance > 0 && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => handleSelectClassToBill(selectedClass)}
+                className="inline-flex items-center px-3.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-lg transition-colors cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5 mr-1" />
+                Revise / Create Class Bill
+              </button>
+            </div>
+          </div>
+
+          {/* FINANCIAL SUMMARY AT TOP: 3 PROMINENT FIGURES */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+            <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-xs">
+              <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">
+                1. Expected Amount
+              </span>
+              <p className="text-3xl font-black text-gray-900 mt-2 font-mono">
+                ₦{classSummary.totalExpected.toLocaleString()}
+              </p>
+              <p className="text-xs text-gray-500 mt-1">Total billed across active students in class</p>
+            </div>
+
+            <div className="bg-white p-6 rounded-2xl border border-emerald-200 shadow-xs bg-emerald-50/20">
+              <span className="text-xs font-bold text-emerald-700 uppercase tracking-wider">
+                2. Amount Received
+              </span>
+              <p className="text-3xl font-black text-emerald-600 mt-2 font-mono">
+                ₦{classSummary.totalCollected.toLocaleString()}
+              </p>
+              <p className="text-xs text-emerald-600 mt-1">Total payments successfully verified</p>
+            </div>
+
+            <div className="bg-white p-6 rounded-2xl border border-rose-200 shadow-xs bg-rose-50/20">
+              <span className="text-xs font-bold text-rose-700 uppercase tracking-wider">
+                3. Outstanding Amount
+              </span>
+              <p className="text-3xl font-black text-rose-600 mt-2 font-mono">
+                ₦{classSummary.totalOutstanding.toLocaleString()}
+              </p>
+              <p className="text-xs text-rose-600 mt-1">Total unpaid balances due</p>
+            </div>
+          </div>
+
+          {/* Student Payment Table Header & Search Filter */}
+          <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div className="relative flex-1 max-w-md">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search student by name or admission number..."
+                value={studentSearch}
+                onChange={(e) => setStudentSearch(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+              />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setStudentStatusFilter('all')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-md border cursor-pointer ${
+                  studentStatusFilter === 'all'
+                    ? 'bg-indigo-600 text-white border-indigo-600'
+                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                }`}
+              >
+                All ({classInvoices.length})
+              </button>
+              <button
+                onClick={() => setStudentStatusFilter('paid')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-md border cursor-pointer ${
+                  studentStatusFilter === 'paid'
+                    ? 'bg-emerald-600 text-white border-emerald-600'
+                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                }`}
+              >
+                Fully Paid ({fullyPaidStudents.length})
+              </button>
+              <button
+                onClick={() => setStudentStatusFilter('partial')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-md border cursor-pointer ${
+                  studentStatusFilter === 'partial'
+                    ? 'bg-amber-600 text-white border-amber-600'
+                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                }`}
+              >
+                Part Payment
+              </button>
+              <button
+                onClick={() => setStudentStatusFilter('unpaid')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-md border cursor-pointer ${
+                  studentStatusFilter === 'unpaid'
+                    ? 'bg-rose-600 text-white border-rose-600'
+                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                }`}
+              >
+                Unpaid
+              </button>
+            </div>
+          </div>
+
+          {/* Student Payment Table */}
+          {classInvoices.length === 0 ? (
+            <div className="bg-white border rounded-xl p-12 text-center text-gray-500 shadow-xs">
+              <CreditCard className="h-12 w-12 mx-auto text-gray-300 mb-3" />
+              <p className="font-bold text-gray-800 text-base">No bills generated for this class yet</p>
+              <p className="text-xs text-gray-500 mt-1 max-w-sm mx-auto">
+                No active invoices exist for students in this class. Click "Create Class Bill" to set tuition and charges.
+              </p>
+              <button
+                onClick={() => handleSelectClassToBill(selectedClass)}
+                className="mt-4 inline-flex items-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg cursor-pointer"
+              >
+                <Plus className="w-4 h-4 mr-1.5" />
+                Generate Class Bill Now
+              </button>
+            </div>
+          ) : (
+            <div className="bg-white rounded-xl border border-gray-200 shadow-xs overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50 text-xs font-bold text-gray-500 uppercase tracking-wider">
+                    <tr>
+                      <th className="px-5 py-3 text-left">Student Name</th>
+                      <th className="px-5 py-3 text-left">Admission No</th>
+                      <th className="px-5 py-3 text-right">Total Bill</th>
+                      <th className="px-5 py-3 text-right">Amount Paid</th>
+                      <th className="px-5 py-3 text-right">Outstanding</th>
+                      <th className="px-5 py-3 text-center">Status</th>
+                      <th className="px-5 py-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {filteredInvoices.map((inv) => (
+                      <tr key={inv._id} className="hover:bg-indigo-50/30 transition-colors">
+                        <td className="px-5 py-3.5 whitespace-nowrap">
+                          <span className="text-sm font-bold text-gray-900">{inv.fullName}</span>
+                          {inv.previousTermCarryover > 0 && (
+                            <span className="text-[10px] text-amber-700 font-semibold bg-amber-50 px-1.5 py-0.5 rounded ml-2">
+                              Carryover: ₦{inv.previousTermCarryover.toLocaleString()}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-5 py-3.5 whitespace-nowrap text-xs font-mono text-gray-600">
+                          {inv.admissionNo}
+                        </td>
+                        <td className="px-5 py-3.5 whitespace-nowrap text-right text-sm font-bold font-mono text-gray-900">
+                          ₦{inv.amountDue.toLocaleString()}
+                        </td>
+                        <td className="px-5 py-3.5 whitespace-nowrap text-right text-sm font-bold font-mono text-emerald-600">
+                          ₦{inv.amountPaid.toLocaleString()}
+                        </td>
+                        <td className="px-5 py-3.5 whitespace-nowrap text-right text-sm font-black font-mono text-rose-600">
+                          ₦{inv.remainingBalance.toLocaleString()}
+                        </td>
+                        <td className="px-5 py-3.5 whitespace-nowrap text-center">
+                          {inv.status === 'paid' ? (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">
+                              <CheckCircle className="w-3 h-3 mr-1 text-emerald-600" /> Fully Paid
+                            </span>
+                          ) : inv.status === 'partial' ? (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800">
+                              <Clock className="w-3 h-3 mr-1 text-amber-600" /> Part Payment
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-100 text-rose-800">
+                              Unpaid
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-5 py-3.5 whitespace-nowrap text-right text-xs">
+                          <div className="flex items-center justify-end space-x-2">
+                            {/* Record Payment Button */}
+                            <button
+                              onClick={() => handleOpenRecordPayment(inv)}
+                              className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs shadow-xs transition-colors cursor-pointer"
+                            >
+                              Record Payment
+                            </button>
+
+                            {/* View / Print Bill */}
+                            <button
+                              onClick={() => handlePrintStudentBill(inv._id)}
+                              className="p-1.5 text-gray-600 hover:text-indigo-600 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
+                              title="Print School Bill"
+                            >
+                              <FileText className="w-4 h-4" />
+                            </button>
+
+                            {/* Print Receipt if paid */}
+                            {inv.amountPaid > 0 && (
                               <button
-                                type="button"
-                                onClick={() => handleOpenPaymentModal(inv)}
-                                className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded text-xs font-semibold"
+                                onClick={() => handleReprintReceipt(inv._id)}
+                                className="p-1.5 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
+                                title="Reprint Official Receipt"
                               >
-                                Pay
+                                <Printer className="w-4 h-4" />
                               </button>
                             )}
-                            <button
-                              type="button"
-                              onClick={() => handleOpenPrintBill(inv._id)}
-                              className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded text-xs font-semibold inline-flex items-center"
-                            >
-                              <Printer className="h-3 w-3 mr-1" /> View/Print
-                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* ========================================================================= */}
+          {/* SECTION 7: PAYMENT REPORTS BELOW TABLE */}
+          {/* ========================================================================= */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-4">
+            {/* A. FULLY PAID STUDENTS */}
+            <div className="bg-white rounded-2xl border border-emerald-200 shadow-xs p-6 space-y-4">
+              <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+                <div className="flex items-center space-x-2">
+                  <CheckCircle className="w-5 h-5 text-emerald-600" />
+                  <h3 className="text-base font-bold text-gray-900">Fully Paid Students</h3>
+                </div>
+                <button
+                  onClick={() => window.print()}
+                  className="inline-flex items-center px-3 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-xs font-bold cursor-pointer"
+                >
+                  <Printer className="w-3.5 h-3.5 mr-1" /> Print List
+                </button>
+              </div>
+
+              {fullyPaidStudents.length === 0 ? (
+                <p className="text-xs text-gray-500 py-6 text-center italic">
+                  No students in this class have fully settled their term fees yet.
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200 text-xs">
+                    <thead className="bg-gray-50 font-bold text-gray-500 uppercase">
+                      <tr>
+                        <th className="px-3 py-2 text-left">Student</th>
+                        <th className="px-3 py-2 text-left">Admission No</th>
+                        <th className="px-3 py-2 text-right">Amount Paid</th>
+                        <th className="px-3 py-2 text-right">Settled Date</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {fullyPaidStudents.map((s, idx) => (
+                        <tr key={idx} className="hover:bg-emerald-50/30">
+                          <td className="px-3 py-2 font-bold text-gray-900">{s.fullName}</td>
+                          <td className="px-3 py-2 font-mono text-gray-600">{s.admissionNo}</td>
+                          <td className="px-3 py-2 text-right font-bold text-emerald-700 font-mono">
+                            ₦{s.totalAmountPaid.toLocaleString()}
+                          </td>
+                          <td className="px-3 py-2 text-right text-gray-500">
+                            {new Date(s.dateFullySettled).toLocaleDateString()}
                           </td>
                         </tr>
                       ))}
@@ -905,98 +950,316 @@ const Fees: React.FC = () => {
                 </div>
               )}
             </div>
-          )}
-        </>
-      )}
 
-      {/* ========================================================================= */}
-      {/* TAB 2: FEES DASHBOARD SUMMARY */}
-      {/* ========================================================================= */}
-      {activeTab === 'dashboard' && dashboardStats && (
-        <div className="space-y-6 print:hidden">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-            <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-xs">
-              <span className="text-xs font-semibold text-gray-500 uppercase">Total Bills Generated</span>
-              <p className="text-2xl font-bold text-gray-900 mt-2">{dashboardStats.totalBillsGenerated || 0}</p>
-            </div>
-            <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-xs">
-              <span className="text-xs font-semibold text-blue-600 uppercase">Total Expected Fees</span>
-              <p className="text-2xl font-bold text-blue-700 mt-2">₦{Number(dashboardStats.totalExpected || 0).toLocaleString()}</p>
-            </div>
-            <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-xs">
-              <span className="text-xs font-semibold text-emerald-600 uppercase">Total Collections</span>
-              <p className="text-2xl font-bold text-emerald-700 mt-2">₦{Number(dashboardStats.totalCollected || 0).toLocaleString()}</p>
-            </div>
-            <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-xs">
-              <span className="text-xs font-semibold text-rose-600 uppercase">Outstanding Balances</span>
-              <p className="text-2xl font-bold text-rose-700 mt-2">₦{Number(dashboardStats.totalOutstanding || 0).toLocaleString()}</p>
+            {/* B. OUTSTANDING PAYMENTS / DEBTORS LIST */}
+            <div className="bg-white rounded-2xl border border-rose-200 shadow-xs p-6 space-y-4">
+              <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+                <div className="flex items-center space-x-2">
+                  <AlertCircle className="w-5 h-5 text-rose-600" />
+                  <h3 className="text-base font-bold text-gray-900">Outstanding Payments / Debtors List</h3>
+                </div>
+                <button
+                  onClick={() => window.print()}
+                  className="inline-flex items-center px-3 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg text-xs font-bold cursor-pointer"
+                >
+                  <Printer className="w-3.5 h-3.5 mr-1" /> Print Debtors
+                </button>
+              </div>
+
+              {debtorsList.length === 0 ? (
+                <p className="text-xs text-emerald-600 py-6 text-center font-bold">
+                  All students in this class have completely settled their payments!
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200 text-xs">
+                    <thead className="bg-gray-50 font-bold text-gray-500 uppercase">
+                      <tr>
+                        <th className="px-3 py-2 text-left">Student</th>
+                        <th className="px-3 py-2 text-left">Admission No</th>
+                        <th className="px-3 py-2 text-right">Outstanding</th>
+                        <th className="px-3 py-2 text-center">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {debtorsList.map((d, idx) => (
+                        <tr key={idx} className="hover:bg-rose-50/30">
+                          <td className="px-3 py-2 font-bold text-gray-900">{d.fullName}</td>
+                          <td className="px-3 py-2 font-mono text-gray-600">{d.admissionNo}</td>
+                          <td className="px-3 py-2 text-right font-black text-rose-700 font-mono">
+                            ₦{d.outstandingAmount.toLocaleString()}
+                          </td>
+                          <td className="px-3 py-2 text-center">
+                            <span
+                              className={`px-2 py-0.5 rounded-full font-bold text-[10px] ${
+                                d.paymentStatus === 'Part Payment'
+                                  ? 'bg-amber-100 text-amber-800'
+                                  : 'bg-rose-100 text-rose-800'
+                              }`}
+                            >
+                              {d.paymentStatus}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
         </div>
       )}
 
       {/* ========================================================================= */}
-      {/* CONFIRM BILL GENERATION MODAL */}
+      {/* VIEW 3: SELECT CLASS TO BILL */}
       {/* ========================================================================= */}
-      {showConfirmModal && selectedClass && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-gray-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-gray-200 p-6 space-y-4">
-            <div className="flex items-center justify-between border-b pb-3">
-              <h3 className="text-lg font-bold text-gray-900">Confirm Class Bill Generation</h3>
-              <button onClick={() => setShowConfirmModal(false)} className="text-gray-400 hover:text-gray-600">
-                <X className="h-5 w-5" />
+      {view === 'generate_bill_class_select' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => setView('classes')}
+                className="inline-flex items-center text-xs font-semibold text-gray-600 hover:text-indigo-600 cursor-pointer"
+              >
+                <ArrowLeft className="w-3.5 h-3.5 mr-1" /> Back to Fees
               </button>
+              <span className="text-gray-300">|</span>
+              <span className="text-xs font-bold text-gray-800">
+                Step 1: Select Class to Generate Bill
+              </span>
+            </div>
+          </div>
+
+          <ClassSelectionGrid
+            classes={classes}
+            loading={loading}
+            error={errorMessage}
+            onSelectClass={handleSelectClassToBill}
+            onRetry={initFees}
+            actionText="Configure Bill for Class"
+          />
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* VIEW 4: CLASS BILLING FORM */}
+      {/* ========================================================================= */}
+      {view === 'generate_bill_form' && selectedClass && (
+        <div className="max-w-4xl mx-auto space-y-6">
+          <div className="flex items-center justify-between bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
+            <button
+              onClick={() => setView('generate_bill_class_select')}
+              className="inline-flex items-center text-xs font-semibold text-gray-600 hover:text-indigo-600 cursor-pointer"
+            >
+              <ArrowLeft className="w-3.5 h-3.5 mr-1" /> Change Class
+            </button>
+            <span className="text-xs font-bold text-gray-800">
+              Billing Class: <span className="text-indigo-600">{selectedClass.name}</span>
+            </span>
+          </div>
+
+          {/* Already Billed Warning */}
+          {carryoverPreview.alreadyBilled && (
+            <div className="bg-amber-50 border-l-4 border-amber-500 p-4 rounded-r-lg text-amber-900 text-xs">
+              <p className="font-bold">A Bill has already been generated for this class.</p>
+              <p className="mt-0.5">
+                {carryoverPreview.existingCount} student invoices exist for the active term. Generating a new bill will revise and overwrite existing bill charges safely.
+              </p>
+            </div>
+          )}
+
+          {/* Automated Carryover Summary Card */}
+          <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-6 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div>
+              <span className="text-xs font-bold uppercase tracking-wider text-amber-800">
+                Automated Previous Term Carryover
+              </span>
+              <p className="text-2xl font-black text-amber-950 mt-1 font-mono">
+                ₦{carryoverPreview.totalCarryover.toLocaleString()}
+              </p>
+              <p className="text-xs text-amber-700 mt-0.5">
+                {carryoverPreview.studentsWithCarryover} student(s) in this class have genuine unpaid balances from prior terms.
+              </p>
+            </div>
+            <span className="text-xs font-semibold px-3 py-1 bg-amber-200/60 text-amber-900 rounded-lg">
+              Auto-Applied Per Student
+            </span>
+          </div>
+
+          {/* Billing Form Card */}
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8 space-y-6">
+            <h2 className="text-lg font-bold text-gray-900 border-b border-gray-100 pb-3">
+              Define Current-Term Charges
+            </h2>
+
+            {/* Tuition (Default First Item) */}
+            <div className="p-4 bg-indigo-50/50 rounded-xl border border-indigo-100 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-indigo-900 uppercase tracking-wider">
+                  Tuition (Default Primary Charge) *
+                </span>
+                <span className="text-[10px] font-bold text-indigo-600 bg-indigo-100 px-2 py-0.5 rounded">
+                  Tuition
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs text-gray-600 font-medium mb-1">
+                    Tuition Amount (₦)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="30000"
+                    value={tuitionAmount}
+                    onChange={(e) =>
+                      setTuitionAmount(e.target.value === '' ? '' : Number(e.target.value))
+                    }
+                    className="w-full text-base font-bold font-mono border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-600 font-medium mb-1">
+                    Description / Note
+                  </label>
+                  <input
+                    type="text"
+                    value={tuitionNote}
+                    onChange={(e) => setTuitionNote(e.target.value)}
+                    className="w-full text-sm border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
             </div>
 
-            <p className="text-xs text-gray-600">
-              You are about to generate individual student invoices for the entire class.
-              Each invoice will apply the current term charges and automatically include each student's previous term carryover debt.
-            </p>
+            {/* Additional Charge Rows */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider">
+                  Additional School Charges / Levies
+                </h3>
+                <button
+                  type="button"
+                  onClick={handleAddChargeRow}
+                  className="inline-flex items-center px-3 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-bold cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5 mr-1" /> Add Charge
+                </button>
+              </div>
 
-            <div className="bg-gray-50 rounded-xl p-4 space-y-2 text-xs">
-              <div className="flex justify-between">
-                <span className="text-gray-600">Class:</span>
-                <strong className="text-gray-900">{selectedClass.name}</strong>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Students to Bill:</span>
-                <strong className="text-gray-900">{carryoverStudents.length} students</strong>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Current Term Charge / Student:</span>
-                <strong className="text-indigo-700">₦{currentTermCharges.toLocaleString()}</strong>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Total Carryover Debt Across Class:</span>
-                <strong className="text-rose-600">₦{totalCarryoverAcrossClass.toLocaleString()}</strong>
-              </div>
-              <div className="flex justify-between border-t pt-2 font-bold text-sm">
-                <span className="text-gray-900">Total Expected Amount:</span>
-                <span className="text-emerald-700">₦{totalClassExpectedAmount.toLocaleString()}</span>
-              </div>
+              {additionalCharges.map((charge) => (
+                <div
+                  key={charge.id}
+                  className="p-4 bg-gray-50 rounded-xl border border-gray-200 grid grid-cols-1 sm:grid-cols-12 gap-3 items-center"
+                >
+                  <div className="sm:col-span-5">
+                    <label className="block text-[11px] text-gray-500 font-medium mb-1">
+                      Charge Description *
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Development Levy"
+                      value={charge.name}
+                      onChange={(e) => handleUpdateChargeRow(charge.id, 'name', e.target.value)}
+                      className="w-full text-xs border border-gray-300 rounded-lg p-2 bg-white focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-3">
+                    <label className="block text-[11px] text-gray-500 font-medium mb-1">
+                      Amount (₦) *
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      placeholder="5000"
+                      value={charge.amount}
+                      onChange={(e) =>
+                        handleUpdateChargeRow(
+                          charge.id,
+                          'amount',
+                          e.target.value === '' ? '' : Number(e.target.value)
+                        )
+                      }
+                      className="w-full text-xs font-bold font-mono border border-gray-300 rounded-lg p-2 bg-white focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-3">
+                    <label className="block text-[11px] text-gray-500 font-medium mb-1">
+                      Optional Note
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Optional note"
+                      value={charge.note}
+                      onChange={(e) => handleUpdateChargeRow(charge.id, 'note', e.target.value)}
+                      className="w-full text-xs border border-gray-300 rounded-lg p-2 bg-white focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-1 text-right sm:text-center pt-2 sm:pt-4">
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveChargeRow(charge.id)}
+                      className="text-gray-400 hover:text-rose-600 cursor-pointer p-1"
+                      title="Remove row"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
 
-            {alreadyBilled && (
-              <div className="bg-amber-50 border border-amber-200 p-3 rounded-lg text-xs text-amber-900">
-                <strong>Notice:</strong> Invoices already exist for this class ({existingInvoiceCount} existing invoice{existingInvoiceCount === 1 ? '' : 's'}). Proceeding will revise/update existing invoices.
-              </div>
-            )}
+            {/* Due Date */}
+            <div>
+              <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
+                Payment Due Date
+              </label>
+              <input
+                type="date"
+                value={billDueDate}
+                onChange={(e) => setBillDueDate(e.target.value)}
+                className="w-full sm:max-w-xs text-sm border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
 
-            <div className="flex items-center justify-end gap-3 pt-3 border-t">
+            {/* Live Bill Summary */}
+            <div className="bg-gray-900 text-white p-6 rounded-2xl space-y-3">
+              <div className="flex items-center justify-between text-xs text-gray-400 uppercase font-bold tracking-wider">
+                <span>Standard Current-Term Total Per Student</span>
+                <span>Carryover Added Individually</span>
+              </div>
+              <p className="text-3xl font-black font-mono text-emerald-400">
+                ₦{currentTermBaseTotal.toLocaleString()}
+              </p>
+              <p className="text-xs text-gray-300 italic">
+                {amountToWords(currentTermBaseTotal)} (plus prior term carryovers where applicable)
+              </p>
+            </div>
+
+            {/* Buttons */}
+            <div className="flex items-center justify-end space-x-3 pt-4 border-t border-gray-100">
               <button
                 type="button"
-                onClick={() => setShowConfirmModal(false)}
-                className="px-4 py-2 border border-gray-300 text-xs font-semibold rounded-lg text-gray-700 hover:bg-gray-50"
+                onClick={() => setView('classes')}
+                className="px-4 py-2 border border-gray-300 rounded-lg text-xs font-semibold text-gray-700 hover:bg-gray-50 cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="button"
-                onClick={() => handleConfirmGenerateBill(alreadyBilled)}
-                disabled={generating}
-                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow-sm"
+                onClick={() => {
+                  if (carryoverPreview.alreadyBilled) {
+                    setOverwriteBill(true);
+                  }
+                  setShowConfirmBillModal(true);
+                }}
+                className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-xs cursor-pointer"
               >
-                {generating ? 'Generating Invoices...' : 'Yes, Generate Invoices'}
+                Generate Bill for All Students in Class →
               </button>
             </div>
           </div>
@@ -1006,220 +1269,520 @@ const Fees: React.FC = () => {
       {/* ========================================================================= */}
       {/* RECORD PAYMENT MODAL */}
       {/* ========================================================================= */}
-      {showPaymentModal && paymentInvoice && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-gray-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-gray-200 p-6 space-y-4">
-            <div className="flex items-center justify-between border-b pb-3">
-              <h3 className="text-base font-bold text-gray-900">Record Fee Payment</h3>
-              <button onClick={() => setShowPaymentModal(false)} className="text-gray-400 hover:text-gray-600">
-                <X className="h-5 w-5" />
+      {showPaymentModal && paymentTargetInvoice && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl p-6 sm:p-8 space-y-5">
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">Record Student Payment</h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Generates an official verifiable payment receipt
+                </p>
+              </div>
+              <button
+                onClick={() => setShowPaymentModal(false)}
+                className="text-gray-400 hover:text-gray-600 cursor-pointer"
+              >
+                ✕
               </button>
             </div>
 
-            <div className="space-y-3 text-xs">
-              <div className="bg-gray-50 p-3 rounded-lg space-y-1">
-                <p>Student: <strong>{paymentInvoice.fullName}</strong> ({paymentInvoice.admissionNo})</p>
-                <p>Invoice #: <strong className="font-mono text-indigo-700">{paymentInvoice.invoiceNumber}</strong></p>
-                <p>Remaining Balance: <strong className="text-rose-600">₦{paymentInvoice.remainingBalance.toLocaleString()}</strong></p>
+            {/* Student & Invoice Summary Strip */}
+            <div className="p-4 bg-gray-50 rounded-xl border border-gray-200 text-xs space-y-1.5">
+              <div className="flex justify-between">
+                <span className="text-gray-500 font-semibold">Student:</span>
+                <span className="font-bold text-gray-900">{paymentTargetInvoice.fullName}</span>
               </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500 font-semibold">Admission No:</span>
+                <span className="font-mono text-gray-800">{paymentTargetInvoice.admissionNo}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500 font-semibold">Total Bill:</span>
+                <span className="font-mono font-bold text-gray-900">
+                  ₦{paymentTargetInvoice.amountDue.toLocaleString()}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500 font-semibold">Previously Paid:</span>
+                <span className="font-mono font-bold text-emerald-600">
+                  ₦{paymentTargetInvoice.amountPaid.toLocaleString()}
+                </span>
+              </div>
+              <div className="flex justify-between border-t border-gray-200 pt-1.5">
+                <span className="text-rose-600 font-bold">Outstanding Balance:</span>
+                <span className="font-mono font-black text-rose-600 text-sm">
+                  ₦{paymentTargetInvoice.remainingBalance.toLocaleString()}
+                </span>
+              </div>
+            </div>
 
+            <form onSubmit={handleRecordPaymentSubmit} className="space-y-4">
               <div>
-                <label className="block font-bold text-gray-700 uppercase mb-1">Amount Paid (₦)</label>
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                  Amount Being Paid (₦) *
+                </label>
                 <input
                   type="number"
                   min="1"
-                  max={paymentInvoice.remainingBalance}
+                  step="any"
                   value={paymentAmount}
-                  onChange={(e) => setPaymentAmount(e.target.value === '' ? '' : parseFloat(e.target.value))}
-                  className="w-full p-2.5 border rounded-lg text-sm font-bold"
+                  onChange={(e) =>
+                    setPaymentAmount(e.target.value === '' ? '' : Number(e.target.value))
+                  }
+                  className="w-full text-base font-black font-mono border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500"
+                  required
+                />
+                {typeof paymentAmount === 'number' && paymentAmount > 0 && (
+                  <p className="text-[11px] text-indigo-700 mt-1 italic font-medium">
+                    {amountToWords(paymentAmount)}
+                  </p>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                    Payment Method *
+                  </label>
+                  <select
+                    value={paymentMethod}
+                    onChange={(e: any) => setPaymentMethod(e.target.value)}
+                    className="w-full text-xs border border-gray-300 rounded-lg p-2.5 bg-white font-medium focus:ring-indigo-500"
+                  >
+                    <option value="bank_transfer">Bank Transfer</option>
+                    <option value="pos">POS Terminal</option>
+                    <option value="cash">Cash</option>
+                    <option value="cheque">Bank Cheque</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                    Payment Date
+                  </label>
+                  <input
+                    type="date"
+                    value={paymentDate}
+                    onChange={(e) => setPaymentDate(e.target.value)}
+                    className="w-full text-xs border border-gray-300 rounded-lg p-2.5 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                  Reference / Transaction Number (Optional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. STANBIC-849129 or POS Ref"
+                  value={paymentRef}
+                  onChange={(e) => setPaymentRef(e.target.value)}
+                  className="w-full text-xs font-mono border border-gray-300 rounded-lg p-2.5 focus:ring-indigo-500"
                 />
               </div>
 
               <div>
-                <label className="block font-bold text-gray-700 uppercase mb-1">Payment Note / Reference</label>
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                  Payment Note (Optional)
+                </label>
                 <input
                   type="text"
+                  placeholder="e.g. Paid by father via bank transfer"
                   value={paymentNote}
                   onChange={(e) => setPaymentNote(e.target.value)}
-                  className="w-full p-2.5 border rounded-lg text-xs"
+                  className="w-full text-xs border border-gray-300 rounded-lg p-2.5 focus:ring-indigo-500"
                 />
+              </div>
+
+              <div className="pt-3 border-t border-gray-100 flex items-center justify-end space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPaymentModal(false)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-xs font-semibold text-gray-700 hover:bg-gray-50 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={recordingPayment}
+                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {recordingPayment ? 'Recording Payment...' : 'Record Payment & Generate Receipt'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* SECTION 6: PRINTABLE OFFICIAL RECEIPT WITH QR CODE */}
+      {/* ========================================================================= */}
+      {showReceiptModal && currentReceipt && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-2xl w-full shadow-2xl overflow-hidden my-8">
+            {/* Top Toolbar (Hidden when printing) */}
+            <div className="bg-gray-900 text-white px-6 py-3.5 flex items-center justify-between print:hidden">
+              <div className="flex items-center space-x-2">
+                <CheckCircle className="w-5 h-5 text-emerald-400" />
+                <span className="text-sm font-bold">Official Payment Receipt Generated</span>
+              </div>
+              <div className="flex items-center space-x-3">
+                <button
+                  onClick={() => window.print()}
+                  className="inline-flex items-center px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-xs cursor-pointer"
+                >
+                  <Printer className="w-3.5 h-3.5 mr-1.5" /> Print Receipt
+                </button>
+                <button
+                  onClick={() => setShowReceiptModal(false)}
+                  className="text-gray-400 hover:text-white cursor-pointer"
+                >
+                  ✕
+                </button>
               </div>
             </div>
 
-            <div className="flex items-center justify-end gap-3 pt-3 border-t">
-              <button
-                type="button"
-                onClick={() => setShowPaymentModal(false)}
-                className="px-4 py-2 border text-xs font-semibold rounded-lg text-gray-700 hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleRecordPayment}
-                disabled={recordingPayment}
-                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-sm"
-              >
-                {recordingPayment ? 'Recording...' : 'Record Payment'}
-              </button>
+            {/* A4 Printable Receipt Content (Lagos State University Style Layout) */}
+            <div className="p-8 sm:p-10 text-gray-900 bg-white" id="printable-receipt">
+              {/* Header with School Branding */}
+              <div className="border-b-2 border-gray-900 pb-4 mb-6 text-center">
+                <h1 className="text-2xl font-black uppercase tracking-wider text-gray-900">
+                  {currentReceipt.school?.name || 'Ijebu-Ode Comprehensive College'}
+                </h1>
+                {currentReceipt.school?.address && (
+                  <p className="text-xs text-gray-600 mt-0.5">{currentReceipt.school.address}</p>
+                )}
+                <div className="inline-block mt-3 px-5 py-1 bg-gray-900 text-white font-black text-xs uppercase tracking-widest rounded-md">
+                  Official Student Fee Payment Receipt
+                </div>
+              </div>
+
+              {/* Receipt Number & Date Strip */}
+              <div className="flex items-center justify-between text-xs border border-gray-300 p-3 rounded-lg bg-gray-50/60 mb-6">
+                <div>
+                  <span className="text-gray-500 font-semibold uppercase">Receipt No: </span>
+                  <span className="font-mono font-black text-indigo-900 text-sm">
+                    {currentReceipt.receiptNumber}
+                  </span>
+                </div>
+                <div className="text-right">
+                  <span className="text-gray-500 font-semibold uppercase">Date: </span>
+                  <span className="font-bold">
+                    {new Date(currentReceipt.paidAt).toLocaleDateString('en-GB', {
+                      day: 'numeric',
+                      month: 'long',
+                      year: 'numeric',
+                    })}
+                  </span>
+                </div>
+              </div>
+
+              {/* Student & Academic Particulars Table */}
+              <div className="border border-gray-300 rounded-lg overflow-hidden mb-6">
+                <table className="min-w-full divide-y divide-gray-300 text-xs">
+                  <tbody>
+                    <tr className="divide-x divide-gray-300">
+                      <td className="w-1/3 px-4 py-2.5 bg-gray-100 font-bold uppercase text-gray-600">
+                        Student Full Name
+                      </td>
+                      <td className="px-4 py-2.5 font-bold text-gray-900">
+                        {currentReceipt.student.fullName}
+                      </td>
+                    </tr>
+                    <tr className="divide-x divide-gray-300">
+                      <td className="px-4 py-2.5 bg-gray-100 font-bold uppercase text-gray-600">
+                        Admission Number
+                      </td>
+                      <td className="px-4 py-2.5 font-mono font-bold text-gray-900">
+                        {currentReceipt.student.admissionNo}
+                      </td>
+                    </tr>
+                    <tr className="divide-x divide-gray-300">
+                      <td className="px-4 py-2.5 bg-gray-100 font-bold uppercase text-gray-600">
+                        Class & Arm
+                      </td>
+                      <td className="px-4 py-2.5 font-bold text-gray-900">
+                        {currentReceipt.className}
+                      </td>
+                    </tr>
+                    <tr className="divide-x divide-gray-300">
+                      <td className="px-4 py-2.5 bg-gray-100 font-bold uppercase text-gray-600">
+                        Academic Session & Term
+                      </td>
+                      <td className="px-4 py-2.5 font-bold text-gray-900">
+                        {currentReceipt.termName}
+                      </td>
+                    </tr>
+                    <tr className="divide-x divide-gray-300">
+                      <td className="px-4 py-2.5 bg-gray-100 font-bold uppercase text-gray-600">
+                        Payment Method
+                      </td>
+                      <td className="px-4 py-2.5 font-bold text-gray-900">
+                        {currentReceipt.paymentMethod.replace('_', ' ').toUpperCase()}{' '}
+                        {currentReceipt.referenceNumber ? `(Ref: ${currentReceipt.referenceNumber})` : ''}
+                      </td>
+                    </tr>
+                    <tr className="divide-x divide-gray-300 bg-gray-50">
+                      <td className="px-4 py-3 bg-gray-200 font-black uppercase text-gray-900">
+                        Amount Paid
+                      </td>
+                      <td className="px-4 py-3 font-black text-xl text-gray-900 font-mono">
+                        ₦{currentReceipt.amountPaid.toLocaleString()}
+                      </td>
+                    </tr>
+                    <tr className="divide-x divide-gray-300">
+                      <td className="px-4 py-2.5 bg-gray-100 font-bold uppercase text-gray-600">
+                        Amount in Words
+                      </td>
+                      <td className="px-4 py-2.5 font-bold text-gray-900 italic">
+                        {currentReceipt.amountInWords}
+                      </td>
+                    </tr>
+                    <tr className="divide-x divide-gray-300">
+                      <td className="px-4 py-2.5 bg-gray-100 font-bold uppercase text-gray-600">
+                        Remaining Balance
+                      </td>
+                      <td className="px-4 py-2.5 font-black font-mono text-rose-700">
+                        ₦{currentReceipt.remainingBalance.toLocaleString()}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              {/* QR Verification & Signature Block */}
+              <div className="grid grid-cols-2 gap-6 pt-6 border-t-2 border-gray-900 items-center">
+                {/* QR Code Block */}
+                <div className="flex items-center space-x-4">
+                  <div className="p-2 border border-gray-300 rounded-lg bg-white shadow-xs">
+                    <QRCodeSVG
+                      value={`http://localhost:5173/verify-receipt/${currentReceipt.verificationCode}`}
+                      size={92}
+                    />
+                  </div>
+                  <div>
+                    <span className="text-[11px] font-bold text-gray-800 uppercase block">
+                      Scan to Verify
+                    </span>
+                    <span className="text-[10px] text-gray-500 font-mono block mt-0.5">
+                      Code: {currentReceipt.verificationCode}
+                    </span>
+                    <span className="text-[10px] text-emerald-700 font-semibold block mt-1">
+                      Official Security Seal
+                    </span>
+                  </div>
+                </div>
+
+                {/* Cashier & Stamp Area */}
+                <div className="text-right text-xs">
+                  <div className="border-b border-gray-900 pb-1 mb-1 font-bold">
+                    {currentReceipt.cashier || 'Authorized Cashier'}
+                  </div>
+                  <p className="text-[11px] font-bold text-gray-600 uppercase">
+                    Authorized Cashier / Bursar
+                  </p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">Stamp & Signature</p>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       )}
 
       {/* ========================================================================= */}
-      {/* PRINTABLE BILL / INVOICE MODAL (A4 Layout with School Branding) */}
+      {/* SECTION 8: PRINTABLE SCHOOL FEE BILL MODAL */}
       {/* ========================================================================= */}
-      {printingInvoice && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-gray-900/70 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-3xl w-full shadow-2xl border border-gray-200 overflow-hidden my-8">
-            <div className="p-4 bg-gray-100 flex items-center justify-between border-b print:hidden">
-              <button
-                onClick={() => setPrintingInvoice(null)}
-                className="text-xs font-semibold text-gray-600 hover:text-gray-900 inline-flex items-center"
-              >
-                <ArrowLeft className="h-3.5 w-3.5 mr-1" /> Close Preview
-              </button>
-              <button
-                onClick={() => window.print()}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg inline-flex items-center shadow-xs cursor-pointer"
-              >
-                <Printer className="h-3.5 w-3.5 mr-1.5" /> Print Bill (A4)
-              </button>
+      {showPrintBillModal && billToPrint && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-3xl w-full shadow-2xl overflow-hidden my-8">
+            <div className="bg-gray-900 text-white px-6 py-3.5 flex items-center justify-between print:hidden">
+              <span className="text-sm font-bold">Official School Fee Invoice / Bill</span>
+              <div className="flex items-center space-x-3">
+                <button
+                  onClick={() => window.print()}
+                  className="inline-flex items-center px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow-xs cursor-pointer"
+                >
+                  <Printer className="w-3.5 h-3.5 mr-1.5" /> Print Bill
+                </button>
+                <button
+                  onClick={() => setShowPrintBillModal(false)}
+                  className="text-gray-400 hover:text-white cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
 
-            <div className="p-8 space-y-6">
-              {/* School Branding Header */}
-              <div className="text-center border-b-2 border-gray-900 pb-4">
-                <h1 className="text-2xl font-black text-gray-900 uppercase tracking-wide">
-                  {printingInvoice.school?.name || 'School Bridge Academy'}
+            {/* A4 Printable Bill Content */}
+            <div className="p-8 sm:p-12 text-gray-900 bg-white" id="printable-bill">
+              {/* Header */}
+              <div className="border-b-2 border-gray-900 pb-4 mb-6 text-center">
+                <h1 className="text-2xl font-black uppercase tracking-wider text-gray-900">
+                  {billToPrint.school?.name || 'Ijebu-Ode Comprehensive College'}
                 </h1>
-                <p className="text-gray-600 text-xs mt-1">{printingInvoice.school?.address || 'School Address'}</p>
-                <h2 className="text-lg font-bold text-indigo-900 mt-2 uppercase tracking-wide">
-                  Official Student Fee Invoice / Bill
-                </h2>
-                <p className="text-xs text-gray-500 font-mono mt-0.5">
-                  Invoice #: {printingInvoice.invoice?.invoiceNumber}
-                </p>
-              </div>
-
-              {/* Student & Bill Details */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-4 bg-gray-50 rounded-lg border border-gray-200 text-xs">
-                <div>
-                  <span className="text-gray-500 block">Student Name:</span>
-                  <strong className="text-gray-900 text-sm">{printingInvoice.invoice?.studentId?.fullName}</strong>
-                </div>
-                <div>
-                  <span className="text-gray-500 block">Admission Number:</span>
-                  <strong className="font-mono text-gray-900">{printingInvoice.invoice?.studentId?.admissionNo}</strong>
-                </div>
-                <div>
-                  <span className="text-gray-500 block">Class:</span>
-                  <strong className="text-gray-900">{printingInvoice.classInfo?.name} - {printingInvoice.classInfo?.arm}</strong>
-                </div>
-                <div>
-                  <span className="text-gray-500 block">Due Date:</span>
-                  <strong className="text-gray-900">
-                    {new Date(printingInvoice.invoice?.dueDate).toLocaleDateString()}
-                  </strong>
+                {billToPrint.school?.address && (
+                  <p className="text-xs text-gray-600 mt-0.5">{billToPrint.school.address}</p>
+                )}
+                <div className="inline-block mt-3 px-5 py-1 bg-gray-900 text-white font-black text-xs uppercase tracking-widest rounded-md">
+                  Official School Fee Bill & Invoice
                 </div>
               </div>
 
-              {/* Itemized Charges */}
-              <div className="space-y-4">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-gray-700 border-b pb-1">
-                  Current Term Charges Breakdown
-                </h3>
-                <table className="min-w-full divide-y divide-gray-200 text-xs border border-gray-200">
-                  <thead className="bg-gray-100 font-bold text-gray-700 uppercase">
+              {/* Meta */}
+              <div className="grid grid-cols-2 gap-4 text-xs border border-gray-300 p-4 rounded-lg bg-gray-50/50 mb-6">
+                <div>
+                  <span className="text-gray-500 font-semibold uppercase">Bill / Invoice #: </span>
+                  <span className="font-mono font-black text-indigo-900">
+                    {billToPrint.invoice?.invoiceNumber}
+                  </span>
+                </div>
+                <div className="text-right">
+                  <span className="text-gray-500 font-semibold uppercase">Bill Date: </span>
+                  <span className="font-bold">
+                    {new Date(billToPrint.invoice?.createdAt || Date.now()).toLocaleDateString()}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-gray-500 font-semibold uppercase">Student: </span>
+                  <span className="font-bold text-gray-900">
+                    {billToPrint.invoice?.studentId?.fullName} ({billToPrint.invoice?.studentId?.admissionNo})
+                  </span>
+                </div>
+                <div className="text-right">
+                  <span className="text-gray-500 font-semibold uppercase">Class: </span>
+                  <span className="font-bold">
+                    {billToPrint.classInfo?.name} - {billToPrint.classInfo?.arm}
+                  </span>
+                </div>
+              </div>
+
+              {/* Itemised Breakdown */}
+              <div className="border border-gray-300 rounded-lg overflow-hidden mb-6">
+                <table className="min-w-full divide-y divide-gray-300 text-xs">
+                  <thead className="bg-gray-100 font-bold uppercase text-gray-700">
                     <tr>
-                      <th className="px-4 py-2 text-left">Description / Service</th>
-                      <th className="px-4 py-2 text-right">Amount (₦)</th>
+                      <th className="px-4 py-2.5 text-left">Description / Particulars</th>
+                      <th className="px-4 py-2.5 text-right">Amount (₦)</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
-                    {(printingInvoice.invoice?.lineItems || [])
-                      .filter((item: any) => !item.isCarryover)
-                      .map((item: any, idx: number) => (
-                        <tr key={idx}>
-                          <td className="px-4 py-2 text-gray-900 font-medium">{item.name}</td>
-                          <td className="px-4 py-2 text-right font-bold text-gray-900">
-                            ₦{Number(item.amount).toLocaleString()}
-                          </td>
-                        </tr>
-                      ))}
-                    <tr className="bg-gray-50 font-bold">
-                      <td className="px-4 py-2 text-gray-900">Subtotal Current Charges</td>
-                      <td className="px-4 py-2 text-right text-indigo-700 font-bold">
-                        ₦{Number(printingInvoice.invoice?.currentTermCharges || 0).toLocaleString()}
+                    {(billToPrint.invoice?.lineItems || []).map((item: any, idx: number) => (
+                      <tr key={idx} className={item.isCarryover ? 'bg-amber-50/50' : ''}>
+                        <td className="px-4 py-2.5 font-medium">
+                          {item.name}
+                          {item.isCarryover && (
+                            <span className="text-[10px] text-amber-800 font-bold ml-2">
+                              (Previous Term Carryover)
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-mono font-bold">
+                          ₦{item.amount.toLocaleString()}
+                        </td>
+                      </tr>
+                    ))}
+                    <tr className="bg-gray-900 text-white font-black text-sm">
+                      <td className="px-4 py-3 uppercase">Total Amount Due</td>
+                      <td className="px-4 py-3 text-right font-mono text-emerald-400">
+                        ₦{billToPrint.invoice?.amountDue.toLocaleString()}
                       </td>
                     </tr>
                   </tbody>
                 </table>
               </div>
 
-              {/* Previous Term Outstanding (Carryover) */}
-              <div className="space-y-4">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-rose-700 border-b pb-1">
-                  Previous Term Outstanding (Carryover)
-                </h3>
-                <table className="min-w-full divide-y divide-gray-200 text-xs border border-gray-200">
-                  <tbody className="divide-y divide-gray-200">
-                    <tr>
-                      <td className="px-4 py-2 text-gray-900 font-medium">Previous Term Outstanding Balance</td>
-                      <td className="px-4 py-2 text-right font-bold text-rose-700">
-                        ₦{Number(printingInvoice.invoice?.previousTermCarryover || 0).toLocaleString()}
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Financial Summary */}
-              <div className="bg-indigo-50 border border-indigo-200 p-4 rounded-xl space-y-2 text-xs">
-                <div className="flex justify-between">
-                  <span className="text-indigo-900">Total Current Term Charges:</span>
-                  <strong className="text-indigo-950 font-mono">
-                    ₦{Number(printingInvoice.invoice?.currentTermCharges || 0).toLocaleString()}
-                  </strong>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-indigo-900">Previous Term Carryover:</span>
-                  <strong className="text-rose-700 font-mono">
-                    ₦{Number(printingInvoice.invoice?.previousTermCarryover || 0).toLocaleString()}
-                  </strong>
-                </div>
-                <div className="flex justify-between border-t border-indigo-200 pt-2 text-sm font-bold">
-                  <span className="text-indigo-950">Total Payable Amount:</span>
-                  <span className="text-indigo-950 font-mono">
-                    ₦{Number(printingInvoice.invoice?.amountDue || 0).toLocaleString()}
-                  </span>
-                </div>
-                <div className="flex justify-between text-xs">
-                  <span className="text-emerald-800">Total Payments Recorded:</span>
-                  <strong className="text-emerald-800 font-mono">
-                    ₦{Number(printingInvoice.totalPaid || 0).toLocaleString()}
-                  </strong>
-                </div>
-                <div className="flex justify-between border-t border-indigo-200 pt-2 text-sm font-bold">
-                  <span className="text-rose-800">Net Outstanding Balance:</span>
-                  <span className="text-rose-800 font-mono">
-                    ₦{Number(printingInvoice.remainingBalance || 0).toLocaleString()}
-                  </span>
-                </div>
+              {/* Bank Details & School Fee Policy */}
+              <div className="border border-gray-200 rounded-xl p-4 bg-gray-50/70 text-xs space-y-2 mb-8">
+                <p className="font-bold text-gray-900 uppercase">Payment Instructions & Bank Account</p>
+                <p className="text-gray-700">
+                  Bank Name: <span className="font-bold">Stanbic IBTC Bank / Zenith Bank</span> • Account Name: <span className="font-bold">{billToPrint.school?.name}</span>
+                </p>
+                <p className="text-gray-700">
+                  Account Number: <span className="font-mono font-bold text-indigo-900">0084920194</span>
+                </p>
+                <p className="text-gray-500 text-[11px] pt-1">
+                  Please use the student's full name and admission number as the payment reference or deposit description.
+                </p>
               </div>
 
               {/* Signatures */}
-              <div className="pt-8 border-t-2 border-gray-300 flex justify-between text-xs text-gray-600">
-                <div className="text-center">
-                  <div className="w-40 border-b border-gray-400 mb-1"></div>
-                  <span>Bursar / Accountant Signature</span>
+              <div className="grid grid-cols-2 gap-8 pt-8 border-t border-gray-300 text-xs">
+                <div>
+                  <div className="border-b border-gray-900 pb-1 mb-1 font-semibold">
+                    Authorized Bursar / Accounts Office
+                  </div>
+                  <p className="text-[10px] text-gray-500 uppercase">Stamp & Signature</p>
                 </div>
-                <div className="text-center">
-                  <div className="w-40 border-b border-gray-400 mb-1"></div>
-                  <span>Official School Stamp</span>
+                <div className="text-right">
+                  <div className="border-b border-gray-900 pb-1 mb-1 font-semibold">
+                    School Principal / Administrator
+                  </div>
+                  <p className="text-[10px] text-gray-500 uppercase">Approved For Issue</p>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal for Bill Generation */}
+      {showConfirmBillModal && selectedClass && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl p-6 space-y-4">
+            <h3 className="text-lg font-bold text-gray-900">Confirm Class Bill Generation</h3>
+            <p className="text-xs text-gray-600 leading-relaxed">
+              You are about to generate bills for all active students in <strong className="text-gray-900">{selectedClass.name}</strong>.
+            </p>
+
+            <div className="p-3 bg-gray-50 rounded-xl text-xs space-y-1">
+              <div className="flex justify-between">
+                <span className="text-gray-500">Base Term Total:</span>
+                <span className="font-bold font-mono">₦{currentTermBaseTotal.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Students with Carryover:</span>
+                <span className="font-bold text-amber-700">{carryoverPreview.studentsWithCarryover}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Total Prior Carryover:</span>
+                <span className="font-bold font-mono text-amber-800">
+                  ₦{carryoverPreview.totalCarryover.toLocaleString()}
+                </span>
+              </div>
+            </div>
+
+            {carryoverPreview.alreadyBilled && (
+              <label className="flex items-start space-x-2 text-xs text-amber-900 bg-amber-50 p-2.5 rounded-lg border border-amber-200">
+                <input
+                  type="checkbox"
+                  checked={overwriteBill}
+                  onChange={(e) => setOverwriteBill(e.target.checked)}
+                  className="mt-0.5 rounded text-amber-600 focus:ring-amber-500"
+                />
+                <span>I confirm that I wish to overwrite and revise the existing bills for this class.</span>
+              </label>
+            )}
+
+            <div className="pt-3 border-t border-gray-100 flex items-center justify-end space-x-2">
+              <button
+                type="button"
+                onClick={() => setShowConfirmBillModal(false)}
+                className="px-4 py-2 border border-gray-300 rounded-lg text-xs font-semibold text-gray-700 hover:bg-gray-50 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmGenerateBill}
+                disabled={generatingBill || (carryoverPreview.alreadyBilled && !overwriteBill)}
+                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-xs cursor-pointer disabled:opacity-50"
+              >
+                {generatingBill ? 'Generating Bills...' : 'Confirm & Generate'}
+              </button>
             </div>
           </div>
         </div>

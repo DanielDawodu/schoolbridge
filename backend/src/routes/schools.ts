@@ -1,12 +1,21 @@
 import express from 'express';
 import { authenticate } from '../middleware/auth';
 import { requireAdmin } from '../middleware/permissions';
-import { getSchool, setActiveTerm, updateSchoolSignature, updateSchool } from '../controllers/schoolController';
+import {
+  getSchool,
+  getActivePeriod,
+  setActiveTerm,
+  updateSchoolSignature,
+  updateSchool,
+} from '../controllers/schoolController';
 
 const router = express.Router();
 
 // All routes require authentication
 router.use(authenticate);
+
+// Get central active academic session & period configuration
+router.get('/active-period', getActivePeriod);
 
 // Get school info (for all authenticated users)
 router.get('/me', getSchool);

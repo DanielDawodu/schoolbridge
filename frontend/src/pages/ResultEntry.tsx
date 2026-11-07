@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import api from '../services/api';
+import { ClassSelectionGrid } from '../components/ClassSelectionGrid';
 import {
-  BookOpen,
   Users,
   Search,
   ArrowLeft,
@@ -169,7 +169,6 @@ const ResultEntry: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Search & Filter states
-  const [classSearch, setClassSearch] = useState<string>('');
   const [studentSearch, setStudentSearch] = useState<string>('');
   const [studentFilter, setStudentFilter] = useState<'all' | 'completed' | 'pending'>('all');
 
@@ -729,17 +728,6 @@ const ResultEntry: React.FC = () => {
     }
   };
 
-  // Filtered classes
-  const filteredClasses = useMemo(() => {
-    return classes.filter((cls) => {
-      const name = typeof cls.classLevelId === 'object' ? cls.classLevelId.name : cls.name || '';
-      const arm = cls.arm || '';
-      const full = `${name} ${arm}`.toLowerCase();
-      const teachers = (cls.assignedTeachers || []).join(' ').toLowerCase();
-      return full.includes(classSearch.toLowerCase()) || teachers.includes(classSearch.toLowerCase());
-    });
-  }, [classes, classSearch]);
-
   // Filtered students
   const filteredStudents = useMemo(() => {
     return students.filter((s) => {
@@ -844,94 +832,32 @@ const ResultEntry: React.FC = () => {
       {/* STEP 1: CLASS SELECTION */}
       {/* ========================================================================= */}
       {currentStep === 'classes' && (
-        <div className="space-y-5">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div className="relative flex-1 max-w-md">
-              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search classes or teachers..."
-                value={classSearch}
-                onChange={(e) => setClassSearch(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-              />
-            </div>
-            <div className="text-xs text-gray-500">
-              Showing {filteredClasses.length} class{filteredClasses.length === 1 ? '' : 'es'}
-            </div>
-          </div>
-
-          {loading ? (
-            <div className="p-12 text-center text-gray-500">
-              <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mb-2"></div>
-              <p>Loading school classes...</p>
-            </div>
-          ) : filteredClasses.length === 0 ? (
-            <div className="bg-white border rounded-lg p-10 text-center text-gray-500">
-              <BookOpen className="h-10 w-10 mx-auto text-gray-400 mb-2" />
-              <p className="font-semibold text-gray-700">No classes found</p>
-              <p className="text-xs mt-1">Try adjusting your search filter or add classes in Settings.</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              {filteredClasses.map((cls) => {
-                const className = typeof cls.classLevelId === 'object' ? cls.classLevelId.name : cls.name || 'Class';
-                const arm = cls.arm || '';
-                const progress = classProgressMap[cls._id] || { completed: 0, total: 0 };
-                const percent = progress.total > 0 ? Math.round((progress.completed / progress.total) * 100) : 0;
-
-                return (
+        <ClassSelectionGrid
+          classes={classes}
+          loading={loading}
+          error={errorMessage}
+          onRetry={initPage}
+          onSelectClass={handleSelectClass}
+          actionText="Open class students"
+          renderProgressOrMeta={(cls) => {
+            const progress = classProgressMap[cls._id] || { completed: 0, total: 0 };
+            const percent = progress.total > 0 ? Math.round((progress.completed / progress.total) * 100) : 0;
+            return (
+              <div>
+                <div className="flex items-center justify-between text-xs text-gray-600 mb-1.5">
+                  <span>Completion Progress</span>
+                  <span className="font-semibold text-indigo-600">{percent}%</span>
+                </div>
+                <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
                   <div
-                    key={cls._id}
-                    onClick={() => handleSelectClass(cls)}
-                    className="bg-white rounded-xl border border-gray-200 shadow-xs hover:shadow-md hover:border-indigo-400 p-5 cursor-pointer transition-all flex flex-col justify-between group"
-                  >
-                    <div>
-                      <div className="flex items-start justify-between">
-                        <div className="h-10 w-10 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-sm">
-                          {arm || 'C'}
-                        </div>
-                        <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-gray-100 text-gray-700">
-                          {cls.studentCount ?? progress.total} Students
-                        </span>
-                      </div>
-
-                      <h3 className="text-lg font-bold text-gray-900 mt-3 group-hover:text-indigo-600 transition-colors">
-                        {className} - {arm}
-                      </h3>
-
-                      <p className="text-xs text-gray-500 mt-1">
-                        Teacher(s):{' '}
-                        <span className="text-gray-700 font-medium">
-                          {cls.assignedTeachers && cls.assignedTeachers.length > 0
-                            ? cls.assignedTeachers.join(', ')
-                            : 'Unassigned'}
-                        </span>
-                      </p>
-                    </div>
-
-                    <div className="mt-5 pt-4 border-t border-gray-100">
-                      <div className="flex items-center justify-between text-xs text-gray-600 mb-1.5">
-                        <span>Completion Progress</span>
-                        <span className="font-semibold text-indigo-600">{percent}%</span>
-                      </div>
-                      <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
-                        <div
-                          className="bg-indigo-600 h-1.5 rounded-full transition-all"
-                          style={{ width: `${percent}%` }}
-                        ></div>
-                      </div>
-                      <div className="mt-3 flex items-center justify-between text-xs text-indigo-600 font-medium">
-                        <span>Open class students</span>
-                        <ChevronRight className="h-4 w-4 group-hover:translate-x-1 transition-transform" />
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+                    className="bg-indigo-600 h-1.5 rounded-full transition-all"
+                    style={{ width: `${percent}%` }}
+                  ></div>
+                </div>
+              </div>
+            );
+          }}
+        />
       )}
 
       {/* ========================================================================= */}
@@ -1229,10 +1155,16 @@ const ResultEntry: React.FC = () => {
               <div className="flex items-center">
                 <CheckCircle className="h-5 w-5 text-emerald-600 mr-2.5 flex-shrink-0" />
                 <div className="text-xs text-emerald-900">
-                  <p className="font-bold">This student result has been completed.</p>
+                  <p className="font-bold">
+                    This student result has been completed.{isApproved && ' (Approved)'}
+                  </p>
                   <p className="text-emerald-700 mt-0.5">
-                    Completed on {completedAt ? new Date(completedAt).toLocaleDateString() : 'N/A'}.
+                    Completed on {completedAt ? new Date(completedAt).toLocaleDateString() : 'N/A'}
+                    {completedBy ? ` by ${completedBy.name || completedBy.fullName || 'Teacher'}` : ''}.
                     {classPosition ? ` Position: #${classPosition} | Class Average: ${classAverage}%` : ''}
+                    {totalMarksObtained !== null && totalAvailableMarks !== null
+                      ? ` | Score: ${totalMarksObtained}/${totalAvailableMarks}`
+                      : ''}
                   </p>
                 </div>
               </div>

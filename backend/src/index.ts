@@ -13,6 +13,7 @@ import migrationsRoutes from './routes/migrations';
 import dashboardRoutes from './routes/dashboard';
 import attendanceRoutes from './routes/attendance';
 import feesRoutes from './routes/fees';
+import voucherRoutes from './routes/vouchers';
 import schoolRoutes from './routes/schools';
 import uploadRoutes from './routes/uploads';
 import promotionRoutes from './routes/promotion';
@@ -55,7 +56,6 @@ app.use(
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
-
 app.use('/api/auth', authRoutes);
 app.use('/api/academic-sessions', academicSessionRoutes);
 app.use('/api/classes', classGroupRoutes);
@@ -72,6 +72,7 @@ if (process.env.NODE_ENV !== 'production' || process.env.ENABLE_MIGRATIONS === '
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/fees', feesRoutes);
+app.use('/api/vouchers', voucherRoutes);
 app.use('/api/schools', schoolRoutes);
 app.use('/api/uploads', uploadRoutes);
 app.use('/api/promotion', promotionRoutes);

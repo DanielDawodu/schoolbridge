@@ -13,6 +13,7 @@ import {
   UserCheck,
   CalendarCheck,
   CreditCard,
+  Receipt,
   ArrowRightLeft,
   Settings,
   LogOut,
@@ -70,6 +71,7 @@ const navGroups: NavGroup[] = [
     label: 'FINANCE',
     items: [
       { name: 'Fees', path: '/fees', icon: CreditCard, roles: ['admin', 'accountant'] },
+      { name: 'Payment Vouchers', path: '/payment-vouchers', icon: Receipt, roles: ['admin', 'accountant'] },
     ],
   },
   {

@@ -6,7 +6,6 @@ import {
   Trophy,
   CheckCircle2,
   Clock,
-  AlertCircle,
   FileText,
   ChevronRight,
 } from 'lucide-react';
