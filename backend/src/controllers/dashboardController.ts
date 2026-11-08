@@ -197,25 +197,39 @@ export const getDashboardStats = async (req: AuthRequest, res: Response): Promis
       if (activeTermInfo?.period?.sessionId) {
         termIds.push(activeTermInfo.period.sessionId);
       }
+      const schoolIdQuery: any[] = [
+        req.user?.schoolId,
+        ...(req.user?.schoolId && mongoose.Types.ObjectId.isValid(req.user.schoolId)
+          ? [new mongoose.Types.ObjectId(req.user.schoolId)]
+          : []),
+      ];
+
       // Also look up any Period belonging to this school that is active
-      const activePeriods = await Period.find({ schoolId: req.user?.schoolId, isActive: true });
+      const activePeriods = await Period.find({ schoolId: { $in: schoolIdQuery }, isActive: true });
       for (const p of activePeriods) {
         termIds.push(p._id);
         if (p.sessionId) termIds.push(p.sessionId);
       }
-      const uniqueTermIds = Array.from(new Set(termIds.map((id) => id.toString()))).map(
-        (id) => new mongoose.Types.ObjectId(id)
-      );
+      const rawTermIds = Array.from(new Set(termIds.map((id) => id.toString())));
+      const uniqueTermIds: any[] = [
+        ...rawTermIds,
+        ...rawTermIds.filter((id) => mongoose.Types.ObjectId.isValid(id)).map((id) => new mongoose.Types.ObjectId(id)),
+      ];
 
       const invoices: any[] = await FeeInvoice.find({
-        schoolId: req.user?.schoolId,
+        schoolId: { $in: schoolIdQuery },
         termId: { $in: uniqueTermIds },
       });
 
-      const invoiceObjectIds = invoices.map((inv: any) => inv._id);
+      const rawInvoiceIds = invoices.map((inv: any) => inv._id.toString());
+      const invoiceQueryIds: any[] = [
+        ...rawInvoiceIds,
+        ...rawInvoiceIds.filter((id) => mongoose.Types.ObjectId.isValid(id)).map((id) => new mongoose.Types.ObjectId(id)),
+      ];
+
       const payments = await FeePayment.find({
-        schoolId: req.user?.schoolId,
-        invoiceId: { $in: invoiceObjectIds },
+        schoolId: { $in: schoolIdQuery },
+        invoiceId: { $in: invoiceQueryIds },
         status: { $ne: 'reversed' },
       });
 

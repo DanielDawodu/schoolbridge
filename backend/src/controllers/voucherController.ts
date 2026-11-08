@@ -5,6 +5,7 @@ import School from '../models/School';
 import User from '../models/User';
 import { AuthRequest } from '../middleware/auth';
 import { amountToWords } from '../utils/numberToWords';
+import { logActivity } from '../models/AuditLog';
 
 /**
  * Get all payment vouchers for school with filtering and stats
@@ -220,6 +221,21 @@ export const createVoucher = async (req: AuthRequest, res: Response): Promise<vo
 
     await voucher.save();
 
+    await logActivity(
+      req,
+      'CREATE_PAYMENT_VOUCHER',
+      'finance_voucher',
+      voucher._id.toString(),
+      {
+        voucherNumber: voucher.voucherNumber,
+        payee: voucher.payee,
+        amount: voucher.amount,
+        category: voucher.category,
+        purpose: voucher.purpose,
+        status: voucher.status,
+      }
+    );
+
     res.status(201).json(voucher);
   } catch (error) {
     console.error('Create voucher error:', error);
@@ -280,6 +296,20 @@ export const updateVoucher = async (req: AuthRequest, res: Response): Promise<vo
     }
 
     await voucher.save();
+
+    await logActivity(
+      req,
+      'UPDATE_PAYMENT_VOUCHER',
+      'finance_voucher',
+      voucher._id.toString(),
+      {
+        voucherNumber: voucher.voucherNumber,
+        payee: voucher.payee,
+        amount: voucher.amount,
+        status: voucher.status,
+      }
+    );
+
     res.json(voucher);
   } catch (error) {
     console.error('Update voucher error:', error);
@@ -339,6 +369,20 @@ export const updateVoucherStatus = async (req: AuthRequest, res: Response): Prom
     }
 
     await voucher.save();
+
+    await logActivity(
+      req,
+      'UPDATE_PAYMENT_VOUCHER',
+      'finance_voucher',
+      voucher._id.toString(),
+      {
+        voucherNumber: voucher.voucherNumber,
+        payee: voucher.payee,
+        amount: voucher.amount,
+        status: voucher.status,
+      }
+    );
+
     res.json(voucher);
   } catch (error) {
     console.error('Update voucher status error:', error);
@@ -366,6 +410,20 @@ export const deleteVoucher = async (req: AuthRequest, res: Response): Promise<vo
     }
 
     await PaymentVoucher.deleteOne({ _id: id });
+
+    await logActivity(
+      req,
+      'DELETE_PAYMENT_VOUCHER',
+      'finance_voucher',
+      Array.isArray(id) ? id[0] : id,
+      {
+        voucherNumber: voucher.voucherNumber,
+        payee: voucher.payee,
+        amount: voucher.amount,
+        status: voucher.status,
+      }
+    );
+
     res.json({ message: 'Voucher deleted successfully' });
   } catch (error) {
     console.error('Delete voucher error:', error);

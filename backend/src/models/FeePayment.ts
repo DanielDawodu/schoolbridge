@@ -45,19 +45,19 @@ export const generateVerificationCode = (): string => {
 const FeePaymentSchema = new Schema<IFeePayment>(
   {
     schoolId: {
-      type: Schema.Types.ObjectId,
+      type: Schema.Types.Mixed,
       ref: 'School',
       required: true,
       index: true,
     },
     invoiceId: {
-      type: Schema.Types.ObjectId,
+      type: Schema.Types.Mixed,
       ref: 'FeeInvoice',
       required: true,
       index: true,
     },
     studentId: {
-      type: Schema.Types.ObjectId,
+      type: Schema.Types.Mixed,
       ref: 'Student',
       required: true,
       index: true,

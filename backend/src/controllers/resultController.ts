@@ -11,6 +11,7 @@ import SubjectRegistration from '../models/SubjectRegistration';
 import User from '../models/User';
 import { AuthRequest } from '../middleware/auth';
 import { addSchoolFilter } from '../middleware/multiTenant';
+import { logActivity } from '../models/AuditLog';
 
 const currentUserIsAdmin = (req: AuthRequest) => req.user?.role === 'admin';
 
@@ -311,6 +312,19 @@ export const createOrUpdateResult = async (req: AuthRequest, res: Response): Pro
       await result.save();
     }
 
+    await logActivity(
+      req,
+      'SAVE_SCORES',
+      'results',
+      result._id.toString(),
+      {
+        studentId,
+        performanceType: performanceType || 'term',
+        totalScore: Math.round(totalScore),
+        subjectsCount: result.subjectScores?.length || 0,
+      }
+    );
+
     if (result.isCompleted) {
       await recalculateClassRankings(req.user?.schoolId, student.classId, targetId, performanceType);
     }
@@ -425,6 +439,18 @@ export const updateHeadOfSchoolComment = async (req: AuthRequest, res: Response)
     result.approvedBy = req.user?.userId as any;
     result.approvedAt = new Date();
     await result.save();
+
+    await logActivity(
+      req,
+      'APPROVE_RESULT_COMMENT',
+      'results',
+      result._id.toString(),
+      {
+        studentId: result.studentId?.toString(),
+        headOfSchoolComment: result.headOfSchoolComment,
+        isApproved: true,
+      }
+    );
 
     res.json(result);
   } catch (error) {
@@ -642,6 +668,19 @@ export const saveStudentResult = async (req: AuthRequest, res: Response): Promis
       });
       await result.save();
     }
+
+    await logActivity(
+      req,
+      'SAVE_SCORES',
+      'results',
+      result._id.toString(),
+      {
+        studentId,
+        performanceType: performanceType || 'term',
+        totalScore: Math.round(totalScore),
+        subjectsCount: result.subjectScores?.length || 0,
+      }
+    );
 
     if (result.isCompleted) {
       await recalculateClassRankings(req.user?.schoolId, student.classId, targetId, performanceType || 'term');
@@ -933,6 +972,21 @@ export const completeStudentResult = async (req: AuthRequest, res: Response): Pr
       .populate('studentId')
       .populate('completedBy', 'name email');
 
+    await logActivity(
+      req,
+      'COMPLETE_RESULT',
+      'results',
+      result._id.toString(),
+      {
+        studentId: student._id?.toString(),
+        classId: student.classId?.toString(),
+        targetId,
+        performanceType,
+        percentage,
+        classPosition: updated?.classPosition,
+      }
+    );
+
     res.json({
       message: 'Result completed successfully!',
       result: updated,
@@ -986,6 +1040,19 @@ export const reopenStudentResult = async (req: AuthRequest, res: Response): Prom
     if (result.classId && classTarget) {
       await recalculateClassRankings(req.user?.schoolId, result.classId, classTarget, result.performanceType);
     }
+
+    await logActivity(
+      req,
+      'REOPEN_RESULT',
+      'results',
+      result._id.toString(),
+      {
+        studentId: result.studentId?.toString(),
+        classId: result.classId?.toString(),
+        targetId: classTarget,
+        performanceType: result.performanceType,
+      }
+    );
 
     res.json({
       message: 'Result reopened for editing. Completion will be required again after changes.',
@@ -1140,6 +1207,17 @@ export const releaseResults = async (req: AuthRequest, res: Response): Promise<v
     });
 
     const result = await StudentResult.updateMany(filter, { isReleased: true });
+
+    await logActivity(
+      req,
+      'RELEASE_RESULTS',
+      'results',
+      classId as string,
+      {
+        targetId,
+        releasedCount: result.modifiedCount,
+      }
+    );
 
     res.json({
       message: `Released ${result.modifiedCount} results`,

@@ -23,7 +23,7 @@ export interface IStudent extends Document {
 
 const StudentSchema: Schema = new Schema({
   schoolId: {
-    type: Schema.Types.ObjectId,
+    type: Schema.Types.Mixed,
     ref: 'School',
     required: true,
   },
