@@ -12,15 +12,22 @@ import Period from '../models/Period';
 import User from '../models/User';
 import { AuthRequest } from '../middleware/auth';
 import { addSchoolFilter } from '../middleware/multiTenant';
+import { logActivity } from '../models/AuditLog';
 
 /**
  * Helper to resolve the active billing term/session for a school.
  */
 export const resolveActiveBillingTerm = async (schoolId: any, customTermId?: string) => {
+  const schoolIdVariants = [
+    schoolId,
+    schoolId?.toString(),
+    ...(mongoose.Types.ObjectId.isValid(schoolId) ? [new mongoose.Types.ObjectId(schoolId)] : []),
+  ];
+
   if (customTermId) {
-    let term = await AcademicSession.findOne({ _id: customTermId, schoolId });
+    let term = await AcademicSession.findOne({ _id: customTermId, schoolId: { $in: schoolIdVariants } });
     if (!term) {
-      const period = await Period.findOne({ _id: customTermId, schoolId })
+      const period = await Period.findOne({ _id: customTermId, schoolId: { $in: schoolIdVariants } })
         .populate('sessionId')
         .populate('termId');
       if (period) {
@@ -28,13 +35,14 @@ export const resolveActiveBillingTerm = async (schoolId: any, customTermId?: str
         return {
           term,
           period,
-          termId: (period.sessionId as any)?._id || period._id,
-          name: `${(period.sessionId as any)?.year || ''} - ${(period.termId as any)?.name || ''}`,
+          termId: period._id,
+          sessionId: (period.sessionId as any)?._id || period.sessionId,
+          name: `${(period.sessionId as any)?.year || term?.year || ''} - ${(period.termId as any)?.name || term?.currentTerm || ''}`.trim(),
         };
       }
     }
     if (term) {
-      return { term, termId: term._id, name: `${term.year} - ${term.currentTerm}` };
+      return { term, termId: term._id, sessionId: term._id, name: `${term.year} - ${term.currentTerm}` };
     }
   }
 
@@ -43,35 +51,36 @@ export const resolveActiveBillingTerm = async (schoolId: any, customTermId?: str
   let period: any = null;
 
   if (school?.activePeriodId) {
-    period = await Period.findOne({ _id: school.activePeriodId, schoolId })
+    period = await Period.findOne({ _id: school.activePeriodId, schoolId: { $in: schoolIdVariants } })
       .populate('sessionId')
       .populate('termId');
-    if (period && period.sessionId) {
-      term = await AcademicSession.findById((period.sessionId as any)._id || period.sessionId);
-      if (term) {
-        return {
-          term,
-          period,
-          termId: term._id,
-          name: `${(period.sessionId as any)?.year || term.year} - ${(period.termId as any)?.name || term.currentTerm}`,
-        };
+    if (period) {
+      if (period.sessionId) {
+        term = await AcademicSession.findById((period.sessionId as any)._id || period.sessionId);
       }
+      return {
+        term,
+        period,
+        termId: period._id,
+        sessionId: (period.sessionId as any)?._id || period.sessionId,
+        name: `${(period.sessionId as any)?.year || term?.year || ''} - ${(period.termId as any)?.name || term?.currentTerm || 'Active Term'}`.trim(),
+      };
     }
   }
 
   if (school?.activeTermId) {
-    term = await AcademicSession.findOne({ _id: school.activeTermId, schoolId });
+    term = await AcademicSession.findOne({ _id: school.activeTermId, schoolId: { $in: schoolIdVariants } });
     if (term) {
-      return { term, termId: term._id, name: `${term.year} - ${term.currentTerm}` };
+      return { term, termId: term._id, sessionId: term._id, name: `${term.year} - ${term.currentTerm}` };
     }
   }
 
-  term = await AcademicSession.findOne({ schoolId }).sort({ createdAt: -1 });
+  term = await AcademicSession.findOne({ schoolId: { $in: schoolIdVariants } }).sort({ createdAt: -1 });
   if (term) {
-    return { term, termId: term._id, name: `${term.year} - ${term.currentTerm}` };
+    return { term, termId: term._id, sessionId: term._id, name: `${term.year} - ${term.currentTerm}` };
   }
 
-  return { term: null, period: null, termId: null, name: '' };
+  return { term: null, period: null, termId: null, sessionId: null, name: 'Active Term' };
 };
 
 /**
@@ -418,6 +427,19 @@ export const generateClassBill = async (req: AuthRequest, res: Response): Promis
       createdInvoices.push(invoice);
     }
 
+    await logActivity(
+      req,
+      'GENERATE_CLASS_BILL',
+      'finance_billing',
+      classId as string,
+      {
+        invoicesCount: createdInvoices.length,
+        currentTermChargesPerStudent: currentTermCharges,
+        totalExpectedAmountForClass: totalExpectedForClass,
+        totalCarryoverAcrossClass: totalCarryoverForClass,
+      }
+    );
+
     res.status(201).json({
       message: `Successfully generated ${createdInvoices.length} invoices for the class`,
       invoicesCount: createdInvoices.length,
@@ -720,6 +742,21 @@ export const recordPayment = async (req: AuthRequest, res: Response): Promise<vo
       },
       cashier: (recordedByUser as any)?.fullName || recordedByUser?.name || 'Authorized Cashier',
     };
+
+    await logActivity(
+      req,
+      'RECORD_PAYMENT',
+      'finance_payment',
+      payment._id.toString(),
+      {
+        receiptNumber: payment.receiptNumber,
+        invoiceId: invoice._id.toString(),
+        studentId: invoice.studentId?.toString(),
+        amountPaid: numAmount,
+        paymentMethod,
+        remainingBalance,
+      }
+    );
 
     res.json({
       payment,
@@ -1300,6 +1337,19 @@ export const reversePayment = async (req: AuthRequest, res: Response): Promise<v
 
       await invoice.save();
     }
+
+    await logActivity(
+      req,
+      'REVERSE_PAYMENT',
+      'finance_payment',
+      payment._id.toString(),
+      {
+        receiptNumber: payment.receiptNumber,
+        invoiceId: payment.invoiceId.toString(),
+        amountReversed: payment.amountPaid,
+        reason: payment.reversalReason,
+      }
+    );
 
     res.json({ message: 'Payment successfully reversed with audit trail preserved', payment });
   } catch (error) {

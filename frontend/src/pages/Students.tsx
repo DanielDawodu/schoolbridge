@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import api from '../services/api';
+import DocumentHeader from '../components/DocumentHeader';
+import { printElement } from '../utils/printHelper';
 import {
   Download,
   Search,
@@ -8,6 +10,7 @@ import {
   User as UserIcon,
   Layers,
   Plus,
+  Printer,
 } from 'lucide-react';
 
 interface Student {
@@ -331,6 +334,15 @@ const Students: React.FC = () => {
           >
             <Download className="w-4 h-4 text-gray-500" />
             <span>Export CSV</span>
+          </button>
+
+          <button
+            onClick={() => printElement('printable-students-register', 'Official Student Register')}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 border border-indigo-200 text-indigo-700 hover:bg-indigo-50 rounded-lg text-sm font-medium transition-colors shadow-2xs cursor-pointer"
+            title="Print Official Student Register"
+          >
+            <Printer className="w-4 h-4 text-indigo-600" />
+            <span>Print Register</span>
           </button>
 
           <button
@@ -973,6 +985,73 @@ const Students: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* HIDDEN PRINTABLE: OFFICIAL STUDENT ENROLLMENT REGISTER */}
+      <div id="printable-students-register" className="hidden print:block p-8 bg-white text-gray-900">
+        <DocumentHeader
+          title="OFFICIAL STUDENT ENROLLMENT REGISTER"
+          subtitle={`Class Filter: ${
+            filterClass
+              ? (() => {
+                  const cls = classes.find((c) => c._id === filterClass);
+                  if (!cls) return 'Selected Class';
+                  const lvl = typeof cls.classLevelId === 'object' ? cls.classLevelId?.name : cls.name;
+                  return `${lvl || 'Class'} ${cls.arm || ''}`.trim();
+                })()
+              : 'All Classes'
+          } | Total Enrolled: ${filteredStudents.length} Students`}
+        />
+        <div className="mt-6 mb-4 flex justify-between items-center text-xs text-gray-600 border-b pb-2">
+          <span>Date Generated: {new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+          <span>Status: Verified Active Registry</span>
+        </div>
+        <table className="w-full border-collapse border border-gray-300 text-xs">
+          <thead>
+            <tr className="bg-gray-100 text-gray-800">
+              <th className="border border-gray-300 px-3 py-2 text-left w-10">S/N</th>
+              <th className="border border-gray-300 px-3 py-2 text-left">Full Name</th>
+              <th className="border border-gray-300 px-3 py-2 text-left">Admission No</th>
+              <th className="border border-gray-300 px-3 py-2 text-left">Class & Arm</th>
+              <th className="border border-gray-300 px-3 py-2 text-center">Stream / Faction</th>
+              <th className="border border-gray-300 px-3 py-2 text-center">Gender</th>
+              <th className="border border-gray-300 px-3 py-2 text-left">Guardian Contact</th>
+              <th className="border border-gray-300 px-3 py-2 text-center">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredStudents.map((st, idx) => (
+              <tr key={st._id} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                <td className="border border-gray-300 px-3 py-2 text-center">{idx + 1}</td>
+                <td className="border border-gray-300 px-3 py-2 font-bold">{st.fullName}</td>
+                <td className="border border-gray-300 px-3 py-2 font-mono">{st.admissionNo}</td>
+                <td className="border border-gray-300 px-3 py-2">
+                  {st.classGroup ? `${st.classGroup.name} ${st.classGroup.arm}` : 'Not Assigned'}
+                </td>
+                <td className="border border-gray-300 px-3 py-2 text-center font-semibold">
+                  {st.stream || 'General'}
+                </td>
+                <td className="border border-gray-300 px-3 py-2 text-center capitalize">{st.gender || '-'}</td>
+                <td className="border border-gray-300 px-3 py-2 font-mono text-[11px]">
+                  {st.guardianPhone || st.guardianName || '-'}
+                </td>
+                <td className="border border-gray-300 px-3 py-2 text-center capitalize font-semibold">
+                  {st.status || 'Active'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="grid grid-cols-2 gap-8 pt-12 mt-8 border-t border-gray-300 text-xs">
+          <div>
+            <div className="border-b border-gray-900 pb-1 mb-1 font-semibold">Admissions & Records Officer</div>
+            <p className="text-[10px] text-gray-500 uppercase">Compiled & Certified By</p>
+          </div>
+          <div className="text-right">
+            <div className="border-b border-gray-900 pb-1 mb-1 font-semibold">School Principal / Head of School</div>
+            <p className="text-[10px] text-gray-500 uppercase">Official Stamp & Date</p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };

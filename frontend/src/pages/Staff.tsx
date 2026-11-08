@@ -1,10 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import api from '../services/api';
+import DocumentHeader from '../components/DocumentHeader';
+import { printElement } from '../utils/printHelper';
 import {
   Download,
   Plus,
   Upload,
   User as UserIcon,
+  Printer,
 } from 'lucide-react';
 
 interface Staff {
@@ -313,6 +316,15 @@ const Staff: React.FC = () => {
           >
             <Download className="w-4 h-4 text-gray-500" />
             <span>Export CSV</span>
+          </button>
+
+          <button
+            onClick={() => printElement('printable-staff-register', 'Official Staff Directory Register')}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 border border-indigo-200 text-indigo-700 hover:bg-indigo-50 rounded-lg text-sm font-medium transition-colors shadow-2xs cursor-pointer"
+            title="Print Official Staff Register"
+          >
+            <Printer className="w-4 h-4 text-indigo-600" />
+            <span>Print Register</span>
           </button>
 
           <button
@@ -707,6 +719,60 @@ const Staff: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* HIDDEN PRINTABLE: OFFICIAL STAFF DIRECTORY & REGISTER */}
+      <div id="printable-staff-register" className="hidden print:block p-8 bg-white text-gray-900">
+        <DocumentHeader
+          title="OFFICIAL STAFF DIRECTORY & REGISTER"
+          subtitle={`Role Filter: ${roleFilter.toUpperCase()} | Total Staff Members: ${filteredStaff.length}`}
+        />
+        <div className="mt-6 mb-4 flex justify-between items-center text-xs text-gray-600 border-b pb-2">
+          <span>Date Generated: {new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+          <span>Status: Verified Official Staff Record</span>
+        </div>
+        <table className="w-full border-collapse border border-gray-300 text-xs">
+          <thead>
+            <tr className="bg-gray-100 text-gray-800">
+              <th className="border border-gray-300 px-3 py-2 text-left w-10">S/N</th>
+              <th className="border border-gray-300 px-3 py-2 text-left">Staff Name</th>
+              <th className="border border-gray-300 px-3 py-2 text-left">Email Address</th>
+              <th className="border border-gray-300 px-3 py-2 text-center">Institutional Role</th>
+              <th className="border border-gray-300 px-3 py-2 text-left">Assigned Classes</th>
+              <th className="border border-gray-300 px-3 py-2 text-center">Account Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredStaff.map((s, idx) => (
+              <tr key={s._id} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                <td className="border border-gray-300 px-3 py-2 text-center">{idx + 1}</td>
+                <td className="border border-gray-300 px-3 py-2 font-bold">{s.name}</td>
+                <td className="border border-gray-300 px-3 py-2 font-mono text-[11px]">{s.email}</td>
+                <td className="border border-gray-300 px-3 py-2 text-center uppercase font-semibold text-[11px]">
+                  {s.role}
+                </td>
+                <td className="border border-gray-300 px-3 py-2 text-[11px]">
+                  {s.assignedClasses && s.assignedClasses.length > 0
+                    ? s.assignedClasses.map((c) => getClassName(c)).join(', ')
+                    : '-'}
+                </td>
+                <td className="border border-gray-300 px-3 py-2 text-center capitalize font-semibold">
+                  {s.status || 'active'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="grid grid-cols-2 gap-8 pt-12 mt-8 border-t border-gray-300 text-xs">
+          <div>
+            <div className="border-b border-gray-900 pb-1 mb-1 font-semibold">Human Resources / Administration</div>
+            <p className="text-[10px] text-gray-500 uppercase">Certified Correct By</p>
+          </div>
+          <div className="text-right">
+            <div className="border-b border-gray-900 pb-1 mb-1 font-semibold">School Principal / Head of School</div>
+            <p className="text-[10px] text-gray-500 uppercase">Institutional Verification Stamp</p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };

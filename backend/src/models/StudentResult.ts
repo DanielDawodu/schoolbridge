@@ -153,27 +153,27 @@ export const generateVerificationCode = (): string => {
 
 const StudentResultSchema: Schema = new Schema({
   schoolId: {
-    type: Schema.Types.ObjectId,
+    type: Schema.Types.Mixed,
     ref: 'School',
     required: true,
   },
   periodId: {
-    type: Schema.Types.ObjectId,
+    type: Schema.Types.Mixed,
     ref: 'Period',
     required: false,
   },
   sessionId: {
-    type: Schema.Types.ObjectId,
+    type: Schema.Types.Mixed,
     ref: 'AcademicSession',
     required: false,
   },
   studentId: {
-    type: Schema.Types.ObjectId,
+    type: Schema.Types.Mixed,
     ref: 'Student',
     required: true,
   },
   classId: {
-    type: Schema.Types.ObjectId,
+    type: Schema.Types.Mixed,
     ref: 'ClassGroup',
     required: false,
   },

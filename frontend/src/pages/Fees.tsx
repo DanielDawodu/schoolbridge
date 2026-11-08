@@ -912,7 +912,7 @@ export const Fees: React.FC = () => {
                   <h3 className="text-base font-bold text-gray-900">Fully Paid Students</h3>
                 </div>
                 <button
-                  onClick={() => window.print()}
+                  onClick={() => printElement('printable-fully-paid', `Fully Paid Students - ${selectedClass?.name || 'Class'}`)}
                   className="inline-flex items-center px-3 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-xs font-bold cursor-pointer"
                 >
                   <Printer className="w-3.5 h-3.5 mr-1" /> Print List
@@ -961,7 +961,7 @@ export const Fees: React.FC = () => {
                   <h3 className="text-base font-bold text-gray-900">Outstanding Payments / Debtors List</h3>
                 </div>
                 <button
-                  onClick={() => window.print()}
+                  onClick={() => printElement('printable-debtors-list', `Debtors List - ${selectedClass?.name || 'Class'}`)}
                   className="inline-flex items-center px-3 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg text-xs font-bold cursor-pointer"
                 >
                   <Printer className="w-3.5 h-3.5 mr-1" /> Print Debtors
@@ -1705,6 +1705,120 @@ export const Fees: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* HIDDEN PRINTABLE: FULLY PAID STUDENTS REPORT */}
+      <div id="printable-fully-paid" className="hidden print:block p-8 bg-white text-gray-900">
+        <DocumentHeader
+          title="FEES MANAGEMENT: FULLY PAID STUDENTS REPORT"
+          subtitle={`Class: ${selectedClass?.name || 'Class'} | Academic Session & Term: ${activeTermInfo?.name || 'Active Term'}`}
+        />
+        <div className="mt-6 mb-4 flex justify-between items-center text-xs text-gray-600 border-b pb-2">
+          <span>Date Generated: {new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+          <span>Total Settled Students: {fullyPaidStudents.length}</span>
+        </div>
+        <table className="w-full border-collapse border border-gray-300 text-xs">
+          <thead>
+            <tr className="bg-gray-100 text-gray-800">
+              <th className="border border-gray-300 px-3 py-2 text-left w-10">S/N</th>
+              <th className="border border-gray-300 px-3 py-2 text-left">Student Name</th>
+              <th className="border border-gray-300 px-3 py-2 text-left">Admission No</th>
+              <th className="border border-gray-300 px-3 py-2 text-right">Amount Paid</th>
+              <th className="border border-gray-300 px-3 py-2 text-center">Settled Date</th>
+            </tr>
+          </thead>
+          <tbody>
+            {fullyPaidStudents.map((s, idx) => (
+              <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                <td className="border border-gray-300 px-3 py-2 text-center">{idx + 1}</td>
+                <td className="border border-gray-300 px-3 py-2 font-bold">{s.fullName}</td>
+                <td className="border border-gray-300 px-3 py-2 font-mono">{s.admissionNo}</td>
+                <td className="border border-gray-300 px-3 py-2 text-right font-mono font-bold text-emerald-700">
+                  ₦{s.totalAmountPaid.toLocaleString()}
+                </td>
+                <td className="border border-gray-300 px-3 py-2 text-center">
+                  {new Date(s.dateFullySettled).toLocaleDateString()}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className="bg-gray-100 font-bold">
+              <td colSpan={3} className="border border-gray-300 px-3 py-2 text-right">TOTAL SETTLED:</td>
+              <td className="border border-gray-300 px-3 py-2 text-right font-mono text-emerald-800">
+                ₦{fullyPaidStudents.reduce((sum, s) => sum + s.totalAmountPaid, 0).toLocaleString()}
+              </td>
+              <td className="border border-gray-300 px-3 py-2"></td>
+            </tr>
+          </tfoot>
+        </table>
+        <div className="grid grid-cols-2 gap-8 pt-12 mt-8 border-t border-gray-300 text-xs">
+          <div>
+            <div className="border-b border-gray-900 pb-1 mb-1 font-semibold">Accountant / Bursar</div>
+            <p className="text-[10px] text-gray-500 uppercase">Signature & Date</p>
+          </div>
+          <div className="text-right">
+            <div className="border-b border-gray-900 pb-1 mb-1 font-semibold">School Principal / Head Teacher</div>
+            <p className="text-[10px] text-gray-500 uppercase">Verification Stamp</p>
+          </div>
+        </div>
+      </div>
+
+      {/* HIDDEN PRINTABLE: DEBTORS / OUTSTANDING PAYMENTS REPORT */}
+      <div id="printable-debtors-list" className="hidden print:block p-8 bg-white text-gray-900">
+        <DocumentHeader
+          title="FEES MANAGEMENT: OUTSTANDING PAYMENTS / DEBTORS LIST"
+          subtitle={`Class: ${selectedClass?.name || 'Class'} | Academic Session & Term: ${activeTermInfo?.name || 'Active Term'}`}
+        />
+        <div className="mt-6 mb-4 flex justify-between items-center text-xs text-gray-600 border-b pb-2">
+          <span>Date Generated: {new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+          <span>Total Debtors: {debtorsList.length}</span>
+        </div>
+        <table className="w-full border-collapse border border-gray-300 text-xs">
+          <thead>
+            <tr className="bg-gray-100 text-gray-800">
+              <th className="border border-gray-300 px-3 py-2 text-left w-10">S/N</th>
+              <th className="border border-gray-300 px-3 py-2 text-left">Student Name</th>
+              <th className="border border-gray-300 px-3 py-2 text-left">Admission No</th>
+              <th className="border border-gray-300 px-3 py-2 text-right">Outstanding Amount</th>
+              <th className="border border-gray-300 px-3 py-2 text-center">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {debtorsList.map((d, idx) => (
+              <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                <td className="border border-gray-300 px-3 py-2 text-center">{idx + 1}</td>
+                <td className="border border-gray-300 px-3 py-2 font-bold">{d.fullName}</td>
+                <td className="border border-gray-300 px-3 py-2 font-mono">{d.admissionNo}</td>
+                <td className="border border-gray-300 px-3 py-2 text-right font-mono font-bold text-rose-700">
+                  ₦{d.outstandingAmount.toLocaleString()}
+                </td>
+                <td className="border border-gray-300 px-3 py-2 text-center">
+                  <span className="font-semibold text-rose-700">{d.paymentStatus}</span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className="bg-gray-100 font-bold">
+              <td colSpan={3} className="border border-gray-300 px-3 py-2 text-right">TOTAL OUTSTANDING:</td>
+              <td className="border border-gray-300 px-3 py-2 text-right font-mono text-rose-800">
+                ₦{debtorsList.reduce((sum, d) => sum + d.outstandingAmount, 0).toLocaleString()}
+              </td>
+              <td className="border border-gray-300 px-3 py-2"></td>
+            </tr>
+          </tfoot>
+        </table>
+        <div className="grid grid-cols-2 gap-8 pt-12 mt-8 border-t border-gray-300 text-xs">
+          <div>
+            <div className="border-b border-gray-900 pb-1 mb-1 font-semibold">Accountant / Bursar</div>
+            <p className="text-[10px] text-gray-500 uppercase">Signature & Date</p>
+          </div>
+          <div className="text-right">
+            <div className="border-b border-gray-900 pb-1 mb-1 font-semibold">School Principal / Head Teacher</div>
+            <p className="text-[10px] text-gray-500 uppercase">Verification Stamp</p>
+          </div>
+        </div>
+      </div>
 
       {/* Confirmation Modal for Bill Generation */}
       {showConfirmBillModal && selectedClass && (

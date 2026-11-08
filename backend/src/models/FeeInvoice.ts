@@ -58,21 +58,21 @@ export const generateInvoiceNumber = (): string => {
 const FeeInvoiceSchema = new Schema<IFeeInvoice>(
   {
     schoolId: {
-      type: Schema.Types.ObjectId,
+      type: Schema.Types.Mixed,
       ref: 'School',
       required: true,
     },
     studentId: {
-      type: Schema.Types.ObjectId,
+      type: Schema.Types.Mixed,
       ref: 'Student',
       required: true,
     },
     classId: {
-      type: Schema.Types.ObjectId,
+      type: Schema.Types.Mixed,
       ref: 'ClassGroup',
     },
     termId: {
-      type: Schema.Types.ObjectId,
+      type: Schema.Types.Mixed,
       ref: 'AcademicSession',
       required: true,
     },
