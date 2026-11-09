@@ -6,6 +6,12 @@ const connectToDatabase = async () => {
   if (mongoose.connection.readyState === 1) {
     return;
   }
+  if (mongoose.connection.readyState === 2) {
+    await new Promise((resolve) => {
+      mongoose.connection.once('open', resolve);
+    });
+    return;
+  }
 
   console.log('Connecting to database...');
   try {
@@ -56,12 +62,15 @@ export default async (req: any, res: any) => {
       res.on('error', reject);
       app(req, res);
     });
-  } catch (error) {
-    console.error('Error handling request:', error);
+  } catch (error: any) {
+    console.error('Error handling request:', error?.message || error);
+    if (error?.stack) {
+      console.error(error.stack);
+    }
     if (!res.headersSent) {
       res.statusCode = 500;
       res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ error: 'Internal server error' }));
+      res.end(JSON.stringify({ error: error?.message || 'Internal server error' }));
     }
   }
 };

@@ -2,17 +2,54 @@ import mongoose from 'mongoose';
 
 export const sanitizeMongoUri = (uri: string): string => {
   if (!uri) return uri;
-  let clean = uri.trim();
-  clean = clean.replace(/[?&][a-zA-Z0-9_-]+=(?=&|$)/g, '');
-  clean = clean.replace(/[?&]$/, '');
-  if (!clean.includes('?') && clean.includes('&')) {
-    clean = clean.replace('&', '?');
+  const clean = uri.trim();
+  const qIndex = clean.indexOf('?');
+  if (qIndex === -1) return clean;
+
+  const base = clean.slice(0, qIndex);
+  const query = clean.slice(qIndex + 1);
+
+  const pairs = query.split('&');
+  const validPairs: string[] = [];
+
+  for (const pair of pairs) {
+    const trimmed = pair.trim();
+    if (!trimmed) continue;
+
+    const eqIdx = trimmed.indexOf('=');
+    if (eqIdx === -1) {
+      // Key with no value (e.g. 'appName' with no '='), invalid in MongoDB options
+      continue;
+    }
+
+    const key = trimmed.slice(0, eqIdx).trim();
+    let val = trimmed.slice(eqIdx + 1).trim();
+
+    // Strip wrapping quotes if any
+    if (
+      (val.startsWith('"') && val.endsWith('"')) ||
+      (val.startsWith("'") && val.endsWith("'"))
+    ) {
+      val = val.slice(1, -1).trim();
+    }
+
+    // If value is empty, drop this parameter to prevent "URI option cannot be specified with no value"
+    if (!val) continue;
+
+    validPairs.push(`${key}=${val}`);
   }
-  return clean;
+
+  return validPairs.length > 0 ? `${base}?${validPairs.join('&')}` : base;
 };
 
 export const connectDB = async (): Promise<void> => {
   if (mongoose.connection.readyState === 1) {
+    return;
+  }
+  if (mongoose.connection.readyState === 2) {
+    await new Promise((resolve) => {
+      mongoose.connection.once('open', resolve);
+    });
     return;
   }
 
@@ -42,4 +79,3 @@ export const disconnectDB = async (): Promise<void> => {
 };
 
 export const getMongoURI = (): string => process.env.MONGODB_URI || '';
-
