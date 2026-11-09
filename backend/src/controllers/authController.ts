@@ -125,8 +125,11 @@ export const login = async (req: Request, res: Response): Promise<void> => {
         address: schoolAddress,
       },
     });
-  } catch (error) {
-    console.error('Login error:', error);
+  } catch (error: any) {
+    console.error('Login error:', error?.message || error);
+    if (error?.stack) {
+      console.error(error.stack);
+    }
     res.status(500).json({ error: 'Internal server error' });
   }
 };
