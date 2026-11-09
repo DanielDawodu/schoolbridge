@@ -10,20 +10,33 @@ const require = createRequire(import.meta.url)
 function verifyReactVersions() {
   console.log('[React Version Check] Validating react and react-dom dependency alignment...')
 
+  const frontendDir = path.resolve(__dirname, '..')
+  const rootDir = path.resolve(frontendDir, '..')
+  const searchPaths = [frontendDir, rootDir]
+
   let reactPkgPath
   let reactDomPkgPath
 
   try {
-    reactPkgPath = require.resolve('react/package.json', { paths: [path.resolve(__dirname, '..')] })
+    reactPkgPath = require.resolve('react/package.json', { paths: searchPaths })
   } catch (err) {
     console.error('[React Version Check Error] Could not resolve react/package.json:', err.message)
     process.exit(1)
   }
 
   try {
-    reactDomPkgPath = require.resolve('react-dom/package.json', { paths: [path.resolve(__dirname, '..')] })
+    reactDomPkgPath = require.resolve('react-dom/package.json', { paths: searchPaths })
   } catch (err) {
     console.error('[React Version Check Error] Could not resolve react-dom/package.json:', err.message)
+    process.exit(1)
+  }
+
+  // Also verify sub-entry resolution works without hardcoded path issues
+  try {
+    require.resolve('react/jsx-runtime', { paths: searchPaths })
+    require.resolve('react-dom/client', { paths: searchPaths })
+  } catch (err) {
+    console.error('[React Version Check Error] Could not resolve React subpaths:', err.message)
     process.exit(1)
   }
 
@@ -53,4 +66,3 @@ function verifyReactVersions() {
 }
 
 verifyReactVersions()
-
