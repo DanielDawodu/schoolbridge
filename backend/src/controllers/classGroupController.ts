@@ -16,27 +16,35 @@ import { logActivity } from '../models/AuditLog';
 
 /**
  * Resolves a ClassLevel ID from either explicit ID or class name.
- * If name is given and doesn't exist, automatically creates the ClassLevel.
+ * Verifies school ownership for security.
  */
 async function resolveClassLevel(
   req: AuthRequest,
   classLevelId?: string,
   name?: string
-): Promise<mongoose.Types.ObjectId | null> {
+): Promise<{ levelId: mongoose.Types.ObjectId | null; error?: string }> {
   const schoolId = req.user?.schoolId;
-  if (!schoolId) return null;
+  if (!schoolId) {
+    return { levelId: null, error: 'Authentication required' };
+  }
 
-  // 1. If explicit classLevelId provided, verify it exists
-  if (classLevelId && mongoose.isValidObjectId(classLevelId)) {
+  // 1. If explicit classLevelId provided, verify it exists and belongs to this school
+  if (classLevelId) {
+    if (!mongoose.isValidObjectId(classLevelId)) {
+      return { levelId: null, error: 'Invalid class level ID format' };
+    }
+
     const existing = await ClassLevel.findOne(
       addSchoolFilter(req, { _id: classLevelId })
     );
-    if (existing) {
-      return existing._id as mongoose.Types.ObjectId;
+    if (!existing) {
+      return { levelId: null, error: 'The specified class level does not exist or does not belong to your school' };
     }
+
+    return { levelId: existing._id as mongoose.Types.ObjectId };
   }
 
-  // 2. If name provided, lookup by case-insensitive name
+  // 2. If name provided, lookup by case-insensitive name for this school
   const trimmedName = (name || '').trim();
   if (trimmedName) {
     const escapedName = trimmedName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -46,200 +54,171 @@ async function resolveClassLevel(
       })
     );
     if (classLevel) {
-      return classLevel._id as mongoose.Types.ObjectId;
+      return { levelId: classLevel._id as mongoose.Types.ObjectId };
     }
 
-    // Auto-create new ClassLevel
+    // Auto-create new ClassLevel strictly scoped to this school
     classLevel = new ClassLevel({
-      schoolId,
+      schoolId: req.user?.schoolId,
       name: trimmedName,
       levelOrder: 0,
     });
     await classLevel.save();
-    return classLevel._id as mongoose.Types.ObjectId;
+    return { levelId: classLevel._id as mongoose.Types.ObjectId };
   }
 
-  return null;
+  return { levelId: null, error: 'Class level or name is required' };
 }
 
 /**
- * Maps an AcademicSession (year, currentTerm) to its corresponding Period.
- * Can optionally create Session, Term, Period if they don't exist yet.
+ * Maps an AcademicSession (year, currentTerm) to its corresponding Period for the authenticated school.
+ * Only creates missing Session, Term, Period records when their exact relationship is safely established.
  */
 async function findPeriodForAcademicSession(
   req: AuthRequest,
-  academicSession: any,
-  autoCreate = false
+  academicSession: any
 ): Promise<mongoose.Types.ObjectId | null> {
   const schoolId = req.user?.schoolId;
   if (!schoolId || !academicSession) return null;
 
-  const termVariants: Record<string, string[]> = {
-    first: ['1st Term', 'First Term', 'first', '1st term'],
-    second: ['2nd Term', 'Second Term', 'second', '2nd term'],
-    third: ['3rd Term', 'Third Term', 'third', '3rd term'],
+  const termMap: Record<string, { names: string[]; canonical: string; order: number }> = {
+    first: { names: ['1st Term', 'First Term', 'first', '1st term'], canonical: '1st Term', order: 1 },
+    second: { names: ['2nd Term', 'Second Term', 'second', '2nd term'], canonical: '2nd Term', order: 2 },
+    third: { names: ['3rd Term', 'Third Term', 'third', '3rd term'], canonical: '3rd Term', order: 3 },
   };
-  const targetTerms = termVariants[academicSession.currentTerm] || ['1st Term', 'First Term', 'first'];
 
+  const termConfig = termMap[academicSession.currentTerm] || {
+    names: ['1st Term', 'First Term'],
+    canonical: '1st Term',
+    order: 1,
+  };
+
+  // 1. Find or safely create Session for this school
   let sessionDoc = await Session.findOne(
     addSchoolFilter(req, { year: academicSession.year })
   );
 
-  if (!sessionDoc && autoCreate) {
+  if (!sessionDoc) {
     sessionDoc = new Session({
-      schoolId,
+      schoolId: req.user?.schoolId,
       year: academicSession.year,
     });
     await sessionDoc.save();
   }
 
-  if (sessionDoc) {
-    let termDoc = await Term.findOne(
-      addSchoolFilter(req, { name: { $in: targetTerms } })
-    );
+  // 2. Find or safely create Term for this school
+  let termDoc = await Term.findOne(
+    addSchoolFilter(req, { name: { $in: termConfig.names } })
+  );
 
-    if (!termDoc && autoCreate) {
-      const termName = academicSession.currentTerm === 'second' ? '2nd Term' : academicSession.currentTerm === 'third' ? '3rd Term' : '1st Term';
-      const termOrder = academicSession.currentTerm === 'second' ? 2 : academicSession.currentTerm === 'third' ? 3 : 1;
-      termDoc = new Term({
-        schoolId,
-        name: termName,
-        order: termOrder,
-      });
-      await termDoc.save();
-    }
-
-    if (termDoc) {
-      let period = await Period.findOne(
-        addSchoolFilter(req, {
-          sessionId: sessionDoc._id,
-          termId: termDoc._id,
-        })
-      );
-
-      if (!period && autoCreate) {
-        period = new Period({
-          schoolId,
-          sessionId: sessionDoc._id,
-          termId: termDoc._id,
-          daysOpen: 0,
-          isActive: true,
-        });
-        await period.save();
-      }
-
-      if (period) {
-        return period._id as mongoose.Types.ObjectId;
-      }
-    }
-
-    // Fallback: any period for this session
-    const anySessionPeriod = await Period.findOne(
-      addSchoolFilter(req, { sessionId: sessionDoc._id })
-    );
-    if (anySessionPeriod) {
-      return anySessionPeriod._id as mongoose.Types.ObjectId;
-    }
+  if (!termDoc) {
+    termDoc = new Term({
+      schoolId: req.user?.schoolId,
+      name: termConfig.canonical,
+      order: termConfig.order,
+    });
+    await termDoc.save();
   }
 
-  return null;
+  // 3. Find or safely create Period for this school, session, and term
+  let period = await Period.findOne(
+    addSchoolFilter(req, {
+      sessionId: sessionDoc._id,
+      termId: termDoc._id,
+    })
+  );
+
+  if (!period) {
+    period = new Period({
+      schoolId: req.user?.schoolId,
+      sessionId: sessionDoc._id,
+      termId: termDoc._id,
+      daysOpen: 0,
+      isActive: false,
+    });
+    await period.save();
+  }
+
+  return period._id as mongoose.Types.ObjectId;
 }
 
 /**
- * Resolves a Period ID from periodId, sessionId, or school active period.
+ * Resolves a Period ID strictly scoped to the authenticated school.
+ * - If an AcademicSession or Period ID is provided, it MUST resolve to that exact record.
+ * - Never falls back to active/latest periods if a specific ID was passed.
  */
 async function resolvePeriod(
   req: AuthRequest,
   periodId?: string,
   sessionId?: string
-): Promise<mongoose.Types.ObjectId | null> {
+): Promise<{ periodId: mongoose.Types.ObjectId | null; error?: string }> {
   const schoolId = req.user?.schoolId;
-  if (!schoolId) return null;
-
-  // 1. Check direct periodId
-  if (periodId && mongoose.isValidObjectId(periodId)) {
-    const directPeriod = await Period.findOne(
-      addSchoolFilter(req, { _id: periodId })
-    );
-    if (directPeriod) {
-      return directPeriod._id as mongoose.Types.ObjectId;
-    }
-
-    // Check if periodId is actually an AcademicSession._id
-    const sessionDoc = await AcademicSession.findOne(
-      addSchoolFilter(req, { _id: periodId })
-    );
-    if (sessionDoc) {
-      const mapped = await findPeriodForAcademicSession(req, sessionDoc);
-      if (mapped) return mapped;
-    }
+  if (!schoolId) {
+    return { periodId: null, error: 'Authentication required' };
   }
 
-  // 2. Check sessionId
-  if (sessionId && mongoose.isValidObjectId(sessionId)) {
-    // A) Is sessionId a Period ID?
-    const periodFromSessionId = await Period.findOne(
-      addSchoolFilter(req, { _id: sessionId })
-    );
-    if (periodFromSessionId) {
-      return periodFromSessionId._id as mongoose.Types.ObjectId;
+  const requestedId = sessionId || periodId;
+
+  // Case 1: Client specified a specific session or period ID
+  if (requestedId) {
+    if (!mongoose.isValidObjectId(requestedId)) {
+      return { periodId: null, error: 'Invalid academic session or period ID format' };
     }
 
-    // B) Is sessionId an AcademicSession ID?
+    // A. Check if requestedId is an AcademicSession belonging to THIS school
     const academicSession = await AcademicSession.findOne(
-      addSchoolFilter(req, { _id: sessionId })
+      addSchoolFilter(req, { _id: requestedId })
     );
+
     if (academicSession) {
-      const mapped = await findPeriodForAcademicSession(req, academicSession);
-      if (mapped) return mapped;
+      const resolved = await findPeriodForAcademicSession(req, academicSession);
+      if (!resolved) {
+        return {
+          periodId: null,
+          error: `Could not establish an academic period for session ${academicSession.year} (${academicSession.currentTerm} term)`,
+        };
+      }
+      return { periodId: resolved };
     }
 
-    // C) Is sessionId a Period.sessionId (referencing Session model)?
-    const periodBySessionRef = await Period.findOne(
-      addSchoolFilter(req, { sessionId })
+    // B. Check if requestedId is directly a Period belonging to THIS school
+    const directPeriod = await Period.findOne(
+      addSchoolFilter(req, { _id: requestedId })
     );
-    if (periodBySessionRef) {
-      return periodBySessionRef._id as mongoose.Types.ObjectId;
+
+    if (directPeriod) {
+      return { periodId: directPeriod._id as mongoose.Types.ObjectId };
     }
+
+    // C. If requestedId was provided but belongs to another school or does not exist:
+    return {
+      periodId: null,
+      error: 'The selected academic session or period does not exist or does not belong to your school',
+    };
   }
 
-  // 3. Fallback to School activePeriodId
+  // Case 2: No specific session or period was requested - use school's active period
   const school = await School.findById(schoolId);
   if (school?.activePeriodId) {
     const activePeriod = await Period.findOne(
       addSchoolFilter(req, { _id: school.activePeriodId })
     );
     if (activePeriod) {
-      return activePeriod._id as mongoose.Types.ObjectId;
+      return { periodId: activePeriod._id as mongoose.Types.ObjectId };
     }
   }
 
-  // 4. Fallback to Period with isActive: true
   const activePeriod = await Period.findOne(
     addSchoolFilter(req, { isActive: true })
   );
   if (activePeriod) {
-    return activePeriod._id as mongoose.Types.ObjectId;
+    return { periodId: activePeriod._id as mongoose.Types.ObjectId };
   }
 
-  // 5. Fallback to latest Period for school
-  const latestPeriod = await Period.findOne(
-    addSchoolFilter(req)
-  ).sort({ createdAt: -1 });
-  if (latestPeriod) {
-    return latestPeriod._id as mongoose.Types.ObjectId;
-  }
-
-  // 6. If no Period exists at all, but school has an AcademicSession, create matching Session, Term, and Period
-  const anyAcademicSession = await AcademicSession.findOne(
-    addSchoolFilter(req)
-  ).sort({ createdAt: -1 });
-  if (anyAcademicSession) {
-    const createdPeriod = await findPeriodForAcademicSession(req, anyAcademicSession, true);
-    if (createdPeriod) return createdPeriod;
-  }
-
-  return null;
+  return {
+    periodId: null,
+    error: 'No academic session was selected, and no active academic period is configured for this school',
+  };
 }
 
 export const createClass = async (req: AuthRequest, res: Response): Promise<void> => {
@@ -267,27 +246,27 @@ export const createClass = async (req: AuthRequest, res: Response): Promise<void
       return;
     }
 
-    const resolvedClassLevelId = await resolveClassLevel(req, classLevelId, inputName);
-    if (!resolvedClassLevelId) {
-      res.status(400).json({ error: 'Failed to resolve or create class level' });
+    const levelResolution = await resolveClassLevel(req, classLevelId, inputName);
+    if (!levelResolution.levelId) {
+      res.status(400).json({ error: levelResolution.error || 'Failed to resolve class level' });
       return;
     }
 
-    const resolvedPeriodId = await resolvePeriod(req, periodId, sessionId);
-    if (!resolvedPeriodId) {
+    const periodResolution = await resolvePeriod(req, periodId, sessionId);
+    if (!periodResolution.periodId) {
       res.status(400).json({
-        error: 'Active academic period or session is required. Please configure an academic session or period first.',
+        error: periodResolution.error || 'Active academic period or session is required',
       });
       return;
     }
 
-    // Check for duplicate class in the same period
+    // Check for duplicate class in the exact same period for this school
     const escapedArm = trimmedArm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const existingClass = await ClassGroup.findOne(
       addSchoolFilter(req, {
-        classLevelId: resolvedClassLevelId,
+        classLevelId: levelResolution.levelId,
         arm: { $regex: new RegExp(`^${escapedArm}$`, 'i') },
-        periodId: resolvedPeriodId,
+        periodId: periodResolution.periodId,
       })
     );
 
@@ -300,9 +279,9 @@ export const createClass = async (req: AuthRequest, res: Response): Promise<void
 
     const classGroup = new ClassGroup({
       schoolId: req.user?.schoolId,
-      classLevelId: resolvedClassLevelId,
+      classLevelId: levelResolution.levelId,
       arm: trimmedArm,
-      periodId: resolvedPeriodId,
+      periodId: periodResolution.periodId,
       faction: faction || null,
     });
     await classGroup.save();
@@ -564,17 +543,21 @@ export const updateClass = async (req: AuthRequest, res: Response): Promise<void
 
     const inputName = (name || className || classLevel || '').trim();
     if (classLevelId || inputName) {
-      const resolvedClassLevelId = await resolveClassLevel(req, classLevelId, inputName);
-      if (resolvedClassLevelId) {
-        updatePayload.classLevelId = resolvedClassLevelId;
+      const levelResolution = await resolveClassLevel(req, classLevelId, inputName);
+      if (!levelResolution.levelId) {
+        res.status(400).json({ error: levelResolution.error || 'Failed to resolve class level' });
+        return;
       }
+      updatePayload.classLevelId = levelResolution.levelId;
     }
 
-    if (periodId || sessionId) {
-      const resolvedPeriodId = await resolvePeriod(req, periodId, sessionId);
-      if (resolvedPeriodId) {
-        updatePayload.periodId = resolvedPeriodId;
+    if (periodId !== undefined || sessionId !== undefined) {
+      const periodResolution = await resolvePeriod(req, periodId, sessionId);
+      if (!periodResolution.periodId) {
+        res.status(400).json({ error: periodResolution.error || 'Failed to resolve academic period' });
+        return;
       }
+      updatePayload.periodId = periodResolution.periodId;
     }
 
     if (faction !== undefined) {
