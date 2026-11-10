@@ -8,7 +8,8 @@ interface ClassGroup {
   arm: string;
   faction?: 'Science' | 'Arts' | 'Commercial' | null;
   classLevelId?: { _id: string; name: string };
-  sessionId: string | { _id: string }; // Allow both string ID and populated object
+  sessionId?: string | { _id: string }; // Allow both string ID and populated object
+  periodId?: any;
   studentCount?: number;
 }
 
@@ -18,9 +19,16 @@ interface AcademicSession {
   currentTerm: string;
 }
 
+interface ClassLevelItem {
+  _id: string;
+  name: string;
+  levelOrder?: number;
+}
+
 const Classes: React.FC = () => {
   const [classes, setClasses] = useState<ClassGroup[]>([]);
   const [sessions, setSessions] = useState<AcademicSession[]>([]);
+  const [classLevels, setClassLevels] = useState<ClassLevelItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingClass, setEditingClass] = useState<ClassGroup | null>(null);
@@ -54,12 +62,14 @@ const Classes: React.FC = () => {
 
   const fetchData = async () => {
     try {
-      const [classesRes, sessionsRes] = await Promise.all([
+      const [classesRes, sessionsRes, classLevelsRes] = await Promise.all([
         api.get('/classes'),
         api.get('/academic-sessions'),
+        api.get('/class-levels').catch(() => ({ data: [] })),
       ]);
       setClasses(classesRes.data);
       setSessions(sessionsRes.data);
+      setClassLevels(classLevelsRes.data || []);
       if (classesRes.data.length > 0) {
         setSelectedClassId(classesRes.data[0]._id);
       }
@@ -132,10 +142,17 @@ const Classes: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      const matchingLevel = classLevels.find(
+        (lvl) => lvl.name.trim().toLowerCase() === formData.name.trim().toLowerCase()
+      );
+
       const payload = {
-        name: formData.name,
-        arm: formData.arm,
+        name: formData.name.trim(),
+        className: formData.name.trim(),
+        classLevelId: matchingLevel?._id || editingClass?.classLevelId?._id,
+        arm: formData.arm.trim(),
         sessionId: formData.sessionId,
+        periodId: formData.sessionId,
         faction: formData.faction || null,
       };
 
@@ -309,6 +326,11 @@ const Classes: React.FC = () => {
                       : classGroup.sessionId;
                     const session = sessions.find((s) => s._id === sessionId);
                     const displayName = classGroup.name || (classGroup.classLevelId as any)?.name || 'Class';
+                    const sessionLabel = session
+                      ? `${session.year} - ${session.currentTerm}`
+                      : (classGroup as any).periodId?.sessionId?.year
+                      ? `${(classGroup as any).periodId.sessionId.year} - ${(classGroup as any).periodId.termId?.name || 'Term'}`
+                      : 'Not assigned';
                     return (
                       <tr key={classGroup._id} className="hover:bg-gray-50 transition-colors">
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
@@ -328,7 +350,7 @@ const Classes: React.FC = () => {
                           )}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {session ? `${session.year} - ${session.currentTerm}` : 'Not assigned'}
+                          {sessionLabel}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-center text-sm">
                           <div className="inline-flex items-center space-x-2">
@@ -597,7 +619,13 @@ const Classes: React.FC = () => {
                   placeholder="e.g., JSS 1, SS 2"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  list="class-level-suggestions"
                 />
+                <datalist id="class-level-suggestions">
+                  {classLevels.map((lvl) => (
+                    <option key={lvl._id} value={lvl.name} />
+                  ))}
+                </datalist>
               </div>
 
               <div>
